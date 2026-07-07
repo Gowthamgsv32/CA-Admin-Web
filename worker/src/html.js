@@ -148,3 +148,209 @@ h1{ font-size:1.35rem; margin:0; }
 </body>
 </html>`
 }
+
+export function buildPhraseHtml({ day, topic, questions }) {
+  const list = questions || []
+
+  const questionsHtml = list
+    .map((q, i) => {
+      const optionsHtml = (q.options || [])
+        .map(
+          (opt, j) =>
+            `<div class="option" data-correct="${j === q.correct_index}">${String.fromCharCode(65 + j)}) ${escapeHtml(opt)}</div>`
+        )
+        .join('\n')
+
+      const divider = i < list.length - 1 ? '<hr style="margin:24px 0;border:none;border-top:1px dashed #ccc;">' : ''
+
+      return `
+<div class="question">${escapeHtml(q.question)}</div>
+
+<div class="options">
+${optionsHtml}
+</div>
+
+<div id="result${i + 1}" class="result"></div>
+
+<div id="explanation${i + 1}" class="explanation">
+💡 <strong>${escapeHtml(q.explanation_title)}</strong><br>
+${escapeHtml(q.explanation_text)}<br>
+<strong>Example:</strong> ${escapeHtml(q.explanation_example)}<br><br>
+<strong>Shortcut:</strong> ${escapeHtml(q.explanation_shortcut)}
+</div>
+${divider}`
+    })
+    .join('\n')
+
+  const setsJs = list
+    .map(
+      (_, i) =>
+        `{ options: document.querySelectorAll('.options')[${i}].children, result: 'result${i + 1}', explanation: 'explanation${i + 1}' }`
+    )
+    .join(',\n')
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Learn by Exam – Day ${escapeHtml(day)} (${escapeHtml(topic)})</title>
+
+<style>
+
+body{
+    font-family:"Segoe UI",Arial,sans-serif;
+    background:#f8f9fa;
+    margin:0;
+    padding:20px;
+    color:#222;
+    line-height:1.6;
+}
+
+.container{
+    max-width:600px;
+    margin:auto;
+    background:#fff;
+    border-radius:10px;
+    padding:2px 24px 24px;
+    box-shadow:0 4px 12px rgba(0,0,0,.1);
+}
+
+h2{
+    text-align:center;
+    color:#333;
+}
+
+.question{
+    background:#eef6ff;
+    border-left:4px solid #007bff;
+    padding:12px;
+    border-radius:6px;
+    font-weight:600;
+    margin-top:18px;
+}
+
+.options{
+    margin:12px 0;
+}
+
+.option{
+    background:#f2f2f2;
+    padding:10px 12px;
+    border-radius:6px;
+    margin:8px 0;
+    cursor:pointer;
+    transition:background .2s;
+}
+
+.option:hover{
+    background:#e6f0ff;
+}
+
+.option.correct{
+    background:#e6ffee;
+    border-left:4px solid #28a745;
+    color:#28a745;
+    font-weight:bold;
+}
+
+.option.wrong{
+    background:#ffeaea;
+    border-left:4px solid #dc3545;
+    color:#dc3545;
+    font-weight:bold;
+}
+
+.result{
+    display:none;
+    margin-top:10px;
+    padding:12px;
+    border-radius:6px;
+    font-weight:bold;
+}
+
+.result.correct{
+    background:#e6ffee;
+    border-left:4px solid #28a745;
+    color:#28a745;
+}
+
+.result.wrong{
+    background:#ffeaea;
+    border-left:4px solid #dc3545;
+    color:#dc3545;
+}
+
+.explanation{
+    display:none;
+    background:#fffbea;
+    border-left:4px solid #ffcc00;
+    padding:12px;
+    border-radius:6px;
+    margin-top:16px;
+}
+
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<h2>🧠 Day ${escapeHtml(day)} – Learn by Exam: ${escapeHtml(topic)}</h2>
+${questionsHtml}
+</div>
+
+<script>
+
+const sets = [
+${setsJs}
+];
+
+sets.forEach(set => {
+
+let answered = false;
+
+[...set.options].forEach(option => {
+
+option.addEventListener('click', () => {
+
+if(answered) return;
+
+answered = true;
+
+const result = document.getElementById(set.result);
+const explanation = document.getElementById(set.explanation);
+
+if(option.dataset.correct === "true"){
+
+option.classList.add("correct");
+result.className="result correct";
+result.innerHTML="🎉 Correct!";
+
+}else{
+
+option.classList.add("wrong");
+result.className="result wrong";
+result.innerHTML="❌ Wrong! Check the correct answer below.";
+
+[...set.options]
+.find(o=>o.dataset.correct==="true")
+.classList.add("correct");
+
+}
+
+result.style.display="block";
+explanation.style.display="block";
+
+});
+
+});
+
+});
+
+</script>
+
+</body>
+</html>`
+}

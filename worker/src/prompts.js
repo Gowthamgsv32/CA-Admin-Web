@@ -64,6 +64,35 @@ Rules:
 - level must reflect the complexity of the topic
 - Return ONLY the JSON object, nothing else`,
 
+  phrase: (topic, day) => `You are an expert English trainer who creates short "Learn by Exam" multiple-choice quiz cards to teach phrasal verbs, idioms, and phrases through interactive questions.
+
+Always respond ONLY with a valid JSON object. No markdown, no explanation, no backticks. Just raw JSON.
+
+Generate a Daily Phrase quiz card for the following topic: "${topic}"
+
+Return a JSON object with exactly these fields:
+
+{
+  "day": ${day},
+  "topic": "<short topic label, e.g. Phrasal Verbs>",
+  "questions": [
+    {
+      "question": "<question text, e.g. What does the phrasal verb \\"X\\" mean?>",
+      "options": ["<option A>", "<option B>", "<option C>", "<option D>"],
+      "correct_index": <0-3, index of the correct option>,
+      "explanation_title": "<short heading, e.g. Phrasal Verb: Get along>",
+      "explanation_text": "<1-2 sentence explanation of the meaning and typical usage>",
+      "explanation_example": "<one natural example sentence using it correctly>",
+      "explanation_shortcut": "<short memorable one-line takeaway>"
+    }
+  ]
+}
+
+Rules:
+- Generate exactly 2 questions for this topic: one testing meaning/recognition, one testing correct usage in a sentence.
+- Exactly one option per question must be correct; the other three must be plausible but clearly wrong.
+- Keep each option under 12 words.
+- Return ONLY the JSON object, nothing else.`,
+
   word: null,
-  phrase: null,
 }

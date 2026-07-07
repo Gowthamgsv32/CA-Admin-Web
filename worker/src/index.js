@@ -1,10 +1,11 @@
 import { PROMPTS } from './prompts.js'
-import { buildResultHtml, buildGrammarHtml } from './html.js'
+import { buildResultHtml, buildGrammarHtml, buildPhraseHtml } from './html.js'
 import { putObjectToSpaces } from './spaces.js'
 
 const HTML_BUILDERS = {
   spoken: buildResultHtml,
   grammer: buildGrammarHtml,
+  phrase: buildPhraseHtml,
 }
 
 function corsHeaders(env) {

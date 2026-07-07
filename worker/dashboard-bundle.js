@@ -66,8 +66,37 @@ Rules:
 - level must reflect the complexity of the topic
 - Return ONLY the JSON object, nothing else`,
 
+  phrase: (topic, day) => `You are an expert English trainer who creates short "Learn by Exam" multiple-choice quiz cards to teach phrasal verbs, idioms, and phrases through interactive questions.
+
+Always respond ONLY with a valid JSON object. No markdown, no explanation, no backticks. Just raw JSON.
+
+Generate a Daily Phrase quiz card for the following topic: "${topic}"
+
+Return a JSON object with exactly these fields:
+
+{
+  "day": ${day},
+  "topic": "<short topic label, e.g. Phrasal Verbs>",
+  "questions": [
+    {
+      "question": "<question text, e.g. What does the phrasal verb \\"X\\" mean?>",
+      "options": ["<option A>", "<option B>", "<option C>", "<option D>"],
+      "correct_index": <0-3, index of the correct option>,
+      "explanation_title": "<short heading, e.g. Phrasal Verb: Get along>",
+      "explanation_text": "<1-2 sentence explanation of the meaning and typical usage>",
+      "explanation_example": "<one natural example sentence using it correctly>",
+      "explanation_shortcut": "<short memorable one-line takeaway>"
+    }
+  ]
+}
+
+Rules:
+- Generate exactly 2 questions for this topic: one testing meaning/recognition, one testing correct usage in a sentence.
+- Exactly one option per question must be correct; the other three must be plausible but clearly wrong.
+- Keep each option under 12 words.
+- Return ONLY the JSON object, nothing else.`,
+
   word: null,
-  phrase: null,
 }
 
 // ---- html.js ----
@@ -222,6 +251,212 @@ h1{ font-size:1.35rem; margin:0; }
 </html>`
 }
 
+function buildPhraseHtml({ day, topic, questions }) {
+  const list = questions || []
+
+  const questionsHtml = list
+    .map((q, i) => {
+      const optionsHtml = (q.options || [])
+        .map(
+          (opt, j) =>
+            `<div class="option" data-correct="${j === q.correct_index}">${String.fromCharCode(65 + j)}) ${escapeHtml(opt)}</div>`
+        )
+        .join('\n')
+
+      const divider = i < list.length - 1 ? '<hr style="margin:24px 0;border:none;border-top:1px dashed #ccc;">' : ''
+
+      return `
+<div class="question">${escapeHtml(q.question)}</div>
+
+<div class="options">
+${optionsHtml}
+</div>
+
+<div id="result${i + 1}" class="result"></div>
+
+<div id="explanation${i + 1}" class="explanation">
+💡 <strong>${escapeHtml(q.explanation_title)}</strong><br>
+${escapeHtml(q.explanation_text)}<br>
+<strong>Example:</strong> ${escapeHtml(q.explanation_example)}<br><br>
+<strong>Shortcut:</strong> ${escapeHtml(q.explanation_shortcut)}
+</div>
+${divider}`
+    })
+    .join('\n')
+
+  const setsJs = list
+    .map(
+      (_, i) =>
+        `{ options: document.querySelectorAll('.options')[${i}].children, result: 'result${i + 1}', explanation: 'explanation${i + 1}' }`
+    )
+    .join(',\n')
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Learn by Exam – Day ${escapeHtml(day)} (${escapeHtml(topic)})</title>
+
+<style>
+
+body{
+    font-family:"Segoe UI",Arial,sans-serif;
+    background:#f8f9fa;
+    margin:0;
+    padding:20px;
+    color:#222;
+    line-height:1.6;
+}
+
+.container{
+    max-width:600px;
+    margin:auto;
+    background:#fff;
+    border-radius:10px;
+    padding:2px 24px 24px;
+    box-shadow:0 4px 12px rgba(0,0,0,.1);
+}
+
+h2{
+    text-align:center;
+    color:#333;
+}
+
+.question{
+    background:#eef6ff;
+    border-left:4px solid #007bff;
+    padding:12px;
+    border-radius:6px;
+    font-weight:600;
+    margin-top:18px;
+}
+
+.options{
+    margin:12px 0;
+}
+
+.option{
+    background:#f2f2f2;
+    padding:10px 12px;
+    border-radius:6px;
+    margin:8px 0;
+    cursor:pointer;
+    transition:background .2s;
+}
+
+.option:hover{
+    background:#e6f0ff;
+}
+
+.option.correct{
+    background:#e6ffee;
+    border-left:4px solid #28a745;
+    color:#28a745;
+    font-weight:bold;
+}
+
+.option.wrong{
+    background:#ffeaea;
+    border-left:4px solid #dc3545;
+    color:#dc3545;
+    font-weight:bold;
+}
+
+.result{
+    display:none;
+    margin-top:10px;
+    padding:12px;
+    border-radius:6px;
+    font-weight:bold;
+}
+
+.result.correct{
+    background:#e6ffee;
+    border-left:4px solid #28a745;
+    color:#28a745;
+}
+
+.result.wrong{
+    background:#ffeaea;
+    border-left:4px solid #dc3545;
+    color:#dc3545;
+}
+
+.explanation{
+    display:none;
+    background:#fffbea;
+    border-left:4px solid #ffcc00;
+    padding:12px;
+    border-radius:6px;
+    margin-top:16px;
+}
+
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<h2>🧠 Day ${escapeHtml(day)} – Learn by Exam: ${escapeHtml(topic)}</h2>
+${questionsHtml}
+</div>
+
+<script>
+
+const sets = [
+${setsJs}
+];
+
+sets.forEach(set => {
+
+let answered = false;
+
+[...set.options].forEach(option => {
+
+option.addEventListener('click', () => {
+
+if(answered) return;
+
+answered = true;
+
+const result = document.getElementById(set.result);
+const explanation = document.getElementById(set.explanation);
+
+if(option.dataset.correct === "true"){
+
+option.classList.add("correct");
+result.className="result correct";
+result.innerHTML="🎉 Correct!";
+
+}else{
+
+option.classList.add("wrong");
+result.className="result wrong";
+result.innerHTML="❌ Wrong! Check the correct answer below.";
+
+[...set.options]
+.find(o=>o.dataset.correct==="true")
+.classList.add("correct");
+
+}
+
+result.style.display="block";
+explanation.style.display="block";
+
+});
+
+});
+
+});
+
+</script>
+
+</body>
+</html>`
+}
+
 // ---- spaces.js ----
 const SPACES_REGION = 'ams3'
 const SPACES_HOST = 'ams3.digitaloceanspaces.com'
@@ -305,6 +540,7 @@ async function putObjectToSpaces({ accessKey, secretKey, key, body, contentType 
 const HTML_BUILDERS = {
   spoken: buildResultHtml,
   grammer: buildGrammarHtml,
+  phrase: buildPhraseHtml,
 }
 
 const ALLOWED_ORIGIN_DEFAULT = 'https://gowthamgsv32.github.io'
