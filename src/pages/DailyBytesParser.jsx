@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
-import { TOPICS_URL, WORKER_URL } from '../config/api'
-import { isoToDMY } from '../utils/dailyBytesPublish'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { DAILY_BYTES_BASE, ROOT_URL, TOPICS_URL, VER_FILE_URL, WORKER_URL } from '../config/api'
+import { buildNextRoot, buildNextVerFile, isoToDMY } from '../utils/dailyBytesPublish'
 import { BYTES_ORDER, buildDayBytesJson, loadStoredVersion, saveStoredVersion } from '../utils/dailyBytesJson'
 
 const CONTENT_TYPES = [
@@ -68,6 +68,11 @@ function DailyBytesParser() {
   const [convertError, setConvertError] = useState('')
   const [dayJson, setDayJson] = useState(null)
 
+  const [currentRoot, setCurrentRoot] = useState(null)
+  const [currentVerFile, setCurrentVerFile] = useState(null)
+  const [loadingServerState, setLoadingServerState] = useState(true)
+  const [serverStateError, setServerStateError] = useState('')
+
   const iframeRef = useRef(null)
 
   useEffect(() => {
@@ -84,6 +89,43 @@ function DailyBytesParser() {
       cancelled = true
     }
   }, [])
+
+  async function loadServerState() {
+    setLoadingServerState(true)
+    setServerStateError('')
+    try {
+      const [rootRes, verRes] = await Promise.all([
+        fetch(ROOT_URL, { cache: 'no-store' }),
+        fetch(VER_FILE_URL, { cache: 'no-store' }),
+      ])
+      if (!rootRes.ok) throw new Error(`Failed to load root.json (${rootRes.status})`)
+      if (!verRes.ok) throw new Error(`Failed to load ver.json (${verRes.status})`)
+      setCurrentRoot(await rootRes.json())
+      setCurrentVerFile(await verRes.json())
+    } catch (err) {
+      setServerStateError(err.message)
+    } finally {
+      setLoadingServerState(false)
+    }
+  }
+
+  useEffect(() => {
+    loadServerState()
+  }, [])
+
+  const selectedDateDMY = useMemo(() => (date ? isoToDMY(date) : ''), [date])
+
+  const nextVerFile = useMemo(() => {
+    if (!currentVerFile || !selectedDateDMY) return null
+    return buildNextVerFile({ currentVerFile, selectedDateDMY })
+  }, [currentVerFile, selectedDateDMY])
+
+  // Every day always contributes exactly 4 bytes (grammer/spoken/phrase/word),
+  // so the month's running "N Daily Bytes" count always advances by 4.
+  const nextRootResult = useMemo(() => {
+    if (!currentRoot || !selectedDateDMY) return null
+    return buildNextRoot({ currentRoot, selectedDateDMY, casCount: 4, baseUrl: DAILY_BYTES_BASE })
+  }, [currentRoot, selectedDateDMY])
 
   useEffect(() => {
     setMatchedPhase('')
@@ -388,6 +430,40 @@ function DailyBytesParser() {
           <pre className="json-preview">{JSON.stringify(dayJson, null, 2)}</pre>
         </section>
       )}
+
+      <section className="form-card">
+        <h3>Server State</h3>
+
+        {loadingServerState && <p className="field-hint">Loading root.json and daily-bytes-ver.json…</p>}
+        {serverStateError && <div className="alert alert-error">{serverStateError}</div>}
+
+        {!loadingServerState && currentVerFile && currentRoot && (
+          <>
+            <p className="field-hint">
+              Version file: v{currentVerFile.ver} ({currentVerFile.date})
+              {nextVerFile && ` → v${nextVerFile.ver} (${nextVerFile.date})`}
+            </p>
+            <p className="field-hint">
+              Root: v{currentRoot.ver}, last updated {currentRoot.date}
+              {nextRootResult && ` → v${nextRootResult.root.ver}, ${nextRootResult.root.date}`}
+            </p>
+            {currentRoot.av_mos?.[0] && (
+              <p className="field-hint">
+                Latest month "{currentRoot.av_mos[0].title}": {currentRoot.av_mos[0].desc} (v
+                {currentRoot.av_mos[0].ver})
+                {nextRootResult &&
+                  ` → ${nextRootResult.root.av_mos[nextRootResult.monthEntryIndex].desc} (v${nextRootResult.root.av_mos[nextRootResult.monthEntryIndex].ver})`}
+              </p>
+            )}
+          </>
+        )}
+
+        <div className="form-actions">
+          <button type="button" className="btn btn-ghost" onClick={loadServerState} disabled={loadingServerState}>
+            Refresh
+          </button>
+        </div>
+      </section>
 
       {(loading || resultHtml) && (
         <section className="result-card">
