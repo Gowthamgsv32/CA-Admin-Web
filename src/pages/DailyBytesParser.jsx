@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { TOPICS_URL, WORKER_URL } from '../config/api'
+import { isoToDMY } from '../utils/dailyBytesPublish'
+import { BYTES_ORDER, buildDayBytesJson, loadStoredVersion, saveStoredVersion } from '../utils/dailyBytesJson'
 
 const CONTENT_TYPES = [
   { value: 'spoken', label: 'Spoken' },
@@ -7,6 +9,8 @@ const CONTENT_TYPES = [
   { value: 'word', label: 'Word' },
   { value: 'phrase', label: 'Phrase' },
 ]
+
+const LABEL_BY_CONTENT_TYPE = Object.fromEntries(CONTENT_TYPES.map((c) => [c.value, c.label]))
 
 // topics.json keys its "grammar" list without the typo our valSelect uses elsewhere.
 const TOPICS_KEY_BY_CONTENT_TYPE = {
@@ -41,6 +45,10 @@ function saveToCache(contentType, day, payload) {
   }
 }
 
+function dayJsonCacheKey(day) {
+  return `dailyBytesDayJson:${day}`
+}
+
 function DailyBytesParser() {
   const [contentType, setContentType] = useState('spoken')
   const [day, setDay] = useState('')
@@ -56,6 +64,9 @@ function DailyBytesParser() {
 
   const [topicsData, setTopicsData] = useState(null)
   const [matchedPhase, setMatchedPhase] = useState('')
+
+  const [convertError, setConvertError] = useState('')
+  const [dayJson, setDayJson] = useState(null)
 
   const iframeRef = useRef(null)
 
@@ -118,6 +129,24 @@ function DailyBytesParser() {
     }
   }, [contentType, day])
 
+  // The combined day JSON is per-day (not per-category), so it gets its
+  // own cache lookup keyed only on `day`.
+  useEffect(() => {
+    setConvertError('')
+
+    if (!day.trim()) {
+      setDayJson(null)
+      return
+    }
+
+    try {
+      const raw = localStorage.getItem(dayJsonCacheKey(day))
+      setDayJson(raw ? JSON.parse(raw) : null)
+    } catch {
+      setDayJson(null)
+    }
+  }, [day])
+
   useEffect(() => {
     const iframe = iframeRef.current
     if (!iframe || !resultHtml) return
@@ -174,6 +203,62 @@ function DailyBytesParser() {
     } finally {
       setLoading(false)
     }
+  }
+
+  function handleConvert() {
+    setConvertError('')
+    setDayJson(null)
+
+    if (!day.trim()) {
+      setConvertError('Please enter a day.')
+      return
+    }
+
+    const missing = []
+    const resultsByType = {}
+    for (const type of BYTES_ORDER) {
+      const cached = loadFromCache(type, day)
+      if (!cached) {
+        missing.push(LABEL_BY_CONTENT_TYPE[type])
+      } else {
+        resultsByType[type] = cached
+      }
+    }
+
+    if (missing.length > 0) {
+      setConvertError(`Generate these first for Day ${day}: ${missing.join(', ')}.`)
+      return
+    }
+
+    const dateDMY = isoToDMY(date)
+    const ver = loadStoredVersion() + 1000
+    const combined = buildDayBytesJson({ dateDMY, ver, resultsByType })
+
+    try {
+      localStorage.setItem(dayJsonCacheKey(day), JSON.stringify(combined))
+    } catch {
+      // localStorage unavailable/full — the preview below still shows the result.
+    }
+    saveStoredVersion(ver)
+
+    setDayJson(combined)
+  }
+
+  function handleDownloadDayJson() {
+    if (!dayJson) return
+
+    const dateDMY = isoToDMY(date)
+    const blob = new Blob([JSON.stringify(dayJson, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${dateDMY}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+
+    URL.revokeObjectURL(url)
   }
 
   function handleDownload() {
@@ -273,8 +358,12 @@ function DailyBytesParser() {
         </label>
 
         {error && <div className="alert alert-error">{error}</div>}
+        {convertError && <div className="alert alert-error">{convertError}</div>}
 
         <div className="form-actions">
+          <button type="button" className="btn btn-ghost" onClick={handleConvert}>
+            Convert JSON
+          </button>
           <button
             type="button"
             className="btn btn-primary"
@@ -285,6 +374,20 @@ function DailyBytesParser() {
           </button>
         </div>
       </section>
+
+      {dayJson && (
+        <section className="result-card">
+          <div className="result-toolbar">
+            <h3>Combined Day JSON</h3>
+            <div className="result-actions">
+              <button type="button" className="btn btn-ghost" onClick={handleDownloadDayJson}>
+                Download JSON
+              </button>
+            </div>
+          </div>
+          <pre className="json-preview">{JSON.stringify(dayJson, null, 2)}</pre>
+        </section>
+      )}
 
       {(loading || resultHtml) && (
         <section className="result-card">
