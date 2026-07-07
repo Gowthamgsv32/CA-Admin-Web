@@ -145,6 +145,14 @@
     max-width: 1500px;
   }
 
+  /* No preview to show yet — don't reserve the right column's width,
+     let the left column use the full page width instead of leaving a
+     big empty gap beside it. */
+  .page:not(:has(.result-card)) {
+    grid-template-columns: 1fr;
+    max-width: 1080px;
+  }
+
   .page > .welcome-card {
     grid-column: 1 / -1;
   }
