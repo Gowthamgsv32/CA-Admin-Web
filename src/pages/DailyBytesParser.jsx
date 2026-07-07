@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { AJAX_URL } from '../config/api'
+import { WORKER_URL } from '../config/api'
 
 const CONTENT_TYPES = [
   { value: 'word', label: 'Word' },
@@ -64,20 +64,15 @@ function DailyBytesParser() {
     setResultJson(null)
 
     try {
-      const res = await fetch(AJAX_URL, {
+      const res = await fetch(`${WORKER_URL}/generate`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          action: 'test_ai',
-          prompt: topic,
-          day,
-          valSelect: contentType,
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: topic, day, valSelect: contentType }),
       })
 
-      if (!res.ok) throw new Error(`Request failed (${res.status})`)
-
       const result = await res.json()
+      if (result.error) throw new Error(result.error)
+
       setResultHtml(result.html)
       setResultJson(result.json)
     } catch (err) {
@@ -113,14 +108,10 @@ function DailyBytesParser() {
     setUploadStatus(null)
 
     try {
-      const res = await fetch(AJAX_URL, {
+      const res = await fetch(`${WORKER_URL}/upload`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          action: 'upload_json_to_spaces',
-          date,
-          json: JSON.stringify(resultJson),
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date, json: resultJson }),
       })
 
       const result = await res.json()
