@@ -3,7 +3,7 @@ import Icon from '../components/Icon'
 import { navItems } from '../config/navigation'
 
 const descriptions = {
-  '/daily-bytes-parser': 'Parse and review daily byte-level transaction logs.',
+  '/daily-bytes-parser': 'Generate and publish daily English-learning content with Gemini.',
   '/static-parser': 'Run static analysis parsing on uploaded datasets.',
   '/ca-parser': 'Extract and validate CA-specific document data.',
 }
