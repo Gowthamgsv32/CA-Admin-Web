@@ -293,6 +293,12 @@
   justify-content: flex-end;
 }
 
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .btn {
   display: inline-flex;
   align-items: center;

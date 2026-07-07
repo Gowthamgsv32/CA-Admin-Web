@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { TOPICS_URL, WORKER_URL } from '../config/api'
 
 const CONTENT_TYPES = [
-  { value: 'word', label: 'Word' },
-  { value: 'grammer', label: 'Grammar' },
   { value: 'spoken', label: 'Spoken' },
+  { value: 'grammer', label: 'Grammar' },
+  { value: 'word', label: 'Word' },
   { value: 'phrase', label: 'Phrase' },
 ]
 
@@ -20,8 +20,29 @@ function todayISO() {
   return new Date().toISOString().split('T')[0]
 }
 
+function cacheKey(contentType, day) {
+  return `dailyBytes:${contentType}:${day}`
+}
+
+function loadFromCache(contentType, day) {
+  try {
+    const raw = localStorage.getItem(cacheKey(contentType, day))
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+function saveToCache(contentType, day, payload) {
+  try {
+    localStorage.setItem(cacheKey(contentType, day), JSON.stringify(payload))
+  } catch {
+    // localStorage unavailable/full — not critical, just skip caching.
+  }
+}
+
 function DailyBytesParser() {
-  const [contentType, setContentType] = useState('')
+  const [contentType, setContentType] = useState('spoken')
   const [day, setDay] = useState('')
   const [date, setDate] = useState(todayISO)
   const [topic, setTopic] = useState('')
@@ -30,6 +51,7 @@ function DailyBytesParser() {
   const [error, setError] = useState('')
   const [resultHtml, setResultHtml] = useState('')
   const [resultJson, setResultJson] = useState(null)
+  const [fromCache, setFromCache] = useState(false)
   const [uploadStatus, setUploadStatus] = useState(null)
 
   const [topicsData, setTopicsData] = useState(null)
@@ -69,6 +91,33 @@ function DailyBytesParser() {
     }
   }, [day, contentType, topicsData])
 
+  // Cache-first preview: whenever the day or category changes, show a
+  // previously generated result immediately if we have one, otherwise
+  // clear the preview so it doesn't show a stale result for a different
+  // day/category combination.
+  useEffect(() => {
+    setUploadStatus(null)
+    setError('')
+
+    if (!contentType || !day.trim()) {
+      setResultHtml('')
+      setResultJson(null)
+      setFromCache(false)
+      return
+    }
+
+    const cached = loadFromCache(contentType, day)
+    if (cached) {
+      setResultHtml(cached.html)
+      setResultJson(cached.json)
+      setFromCache(true)
+    } else {
+      setResultHtml('')
+      setResultJson(null)
+      setFromCache(false)
+    }
+  }, [contentType, day])
+
   useEffect(() => {
     const iframe = iframeRef.current
     if (!iframe || !resultHtml) return
@@ -105,6 +154,7 @@ function DailyBytesParser() {
     setLoading(true)
     setResultHtml('')
     setResultJson(null)
+    setFromCache(false)
 
     try {
       const res = await fetch(`${WORKER_URL}/generate`, {
@@ -118,6 +168,7 @@ function DailyBytesParser() {
 
       setResultHtml(result.html)
       setResultJson(result.json)
+      saveToCache(contentType, day, { html: result.html, json: result.json })
     } catch (err) {
       setError(`Something went wrong: ${err.message}`)
     } finally {
@@ -178,18 +229,6 @@ function DailyBytesParser() {
       <section className="form-card">
         <div className="form-grid">
           <label className="field">
-            <span>Content type</span>
-            <select value={contentType} onChange={(e) => setContentType(e.target.value)}>
-              <option value="">Select an option</option>
-              {CONTENT_TYPES.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="field">
             <span>Day</span>
             <input
               type="number"
@@ -203,6 +242,23 @@ function DailyBytesParser() {
             <span>Date</span>
             <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
           </label>
+        </div>
+
+        <div className="field">
+          <span>Content type</span>
+          <div className="button-row">
+            {CONTENT_TYPES.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                className={`btn ${contentType === opt.value ? 'btn-primary' : 'btn-ghost'}`}
+                aria-pressed={contentType === opt.value}
+                onClick={() => setContentType(opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         <label className="field">
@@ -233,7 +289,7 @@ function DailyBytesParser() {
       {(loading || resultHtml) && (
         <section className="result-card">
           <div className="result-toolbar">
-            <h3>Preview</h3>
+            <h3>Preview{fromCache && !loading && <span className="field-hint"> · loaded from local cache</span>}</h3>
             <div className="result-actions">
               <button
                 type="button"
