@@ -250,6 +250,12 @@
   color: var(--text-h);
 }
 
+.field-hint {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
 .field select,
 .field input,
 .field textarea {
