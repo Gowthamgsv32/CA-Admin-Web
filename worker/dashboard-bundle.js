@@ -758,7 +758,11 @@ async function handleGenerate(request, env) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ parts: [{ text: promptBuilder(prompt, day) }] }],
-        generationConfig: { temperature: 0.7, maxOutputTokens: 1000 },
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 2048,
+          thinkingConfig: { thinkingBudget: 0 },
+        },
       }),
     }
   )
@@ -768,6 +772,7 @@ async function handleGenerate(request, env) {
     return json(env, { error: geminiBody.error.message }, 502)
   }
 
+  const finishReason = geminiBody.candidates?.[0]?.finishReason
   let rawText = geminiBody.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
   rawText = rawText.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim()
 
@@ -775,6 +780,9 @@ async function handleGenerate(request, env) {
   try {
     data = JSON.parse(rawText)
   } catch {
+    if (finishReason === 'MAX_TOKENS') {
+      return json(env, { error: 'Gemini response was cut off (ran out of output tokens) before finishing the JSON. Try again.' }, 502)
+    }
     return json(env, { error: `Failed to parse AI response: ${rawText}` }, 502)
   }
 
