@@ -27,7 +27,7 @@ function toHex(buf) {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
-export async function putObjectToSpaces({ accessKey, secretKey, key, body }) {
+export async function putObjectToSpaces({ accessKey, secretKey, key, body, contentType = 'application/json' }) {
   const path = `/${BUCKET}/${key}`
   const now = new Date()
   const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '')
@@ -36,7 +36,7 @@ export async function putObjectToSpaces({ accessKey, secretKey, key, body }) {
   const payloadHash = await sha256Hex(body)
 
   const canonicalHeaders =
-    `content-type:application/json\n` +
+    `content-type:${contentType}\n` +
     `host:${HOST}\n` +
     `x-amz-content-sha256:${payloadHash}\n` +
     `x-amz-date:${amzDate}\n`
@@ -65,7 +65,7 @@ export async function putObjectToSpaces({ accessKey, secretKey, key, body }) {
   const res = await fetch(`https://${HOST}${path}`, {
     method: 'PUT',
     headers: {
-      'Content-Type': 'application/json',
+      'Content-Type': contentType,
       'X-Amz-Content-Sha256': payloadHash,
       'X-Amz-Date': amzDate,
       Authorization: authorization,
