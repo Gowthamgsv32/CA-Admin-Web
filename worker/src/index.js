@@ -80,6 +80,40 @@ async function handleUpload(request, env) {
   }
 }
 
+function base64ToBytes(base64) {
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  return bytes
+}
+
+// Generic batch file upload used by the Daily Bytes publish flow (day json,
+// month json, root json, ver json, month zip). Business logic (merging,
+// versioning) lives entirely in the frontend — this just signs and writes
+// whatever files it's given.
+async function handlePublish(request, env) {
+  const { files } = await request.json()
+
+  const results = []
+  for (const file of files) {
+    try {
+      const body = file.bodyBase64 ? base64ToBytes(file.bodyBase64) : file.body
+      await putObjectToSpaces({
+        accessKey: env.DO_SPACES_KEY,
+        secretKey: env.DO_SPACES_SECRET,
+        key: file.key,
+        body,
+        contentType: file.contentType || 'application/json',
+      })
+      results.push({ key: file.key, success: true })
+    } catch (err) {
+      results.push({ key: file.key, success: false, error: err.message })
+    }
+  }
+
+  return json(env, { results })
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') {
@@ -94,6 +128,9 @@ export default {
       }
       if (request.method === 'POST' && url.pathname === '/upload') {
         return await handleUpload(request, env)
+      }
+      if (request.method === 'POST' && url.pathname === '/publish') {
+        return await handlePublish(request, env)
       }
       return json(env, { error: 'Not found' }, 404)
     } catch (err) {

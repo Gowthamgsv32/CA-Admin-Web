@@ -101,7 +101,7 @@ function toHex(buf) {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
-async function putObjectToSpaces({ accessKey, secretKey, key, body }) {
+async function putObjectToSpaces({ accessKey, secretKey, key, body, contentType = 'application/json' }) {
   const path = `/${SPACES_BUCKET}/${key}`
   const now = new Date()
   const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '')
@@ -110,7 +110,7 @@ async function putObjectToSpaces({ accessKey, secretKey, key, body }) {
   const payloadHash = await sha256Hex(body)
 
   const canonicalHeaders =
-    `content-type:application/json\n` +
+    `content-type:${contentType}\n` +
     `host:${SPACES_HOST}\n` +
     `x-amz-content-sha256:${payloadHash}\n` +
     `x-amz-date:${amzDate}\n`
@@ -139,7 +139,7 @@ async function putObjectToSpaces({ accessKey, secretKey, key, body }) {
   const res = await fetch(`https://${SPACES_HOST}${path}`, {
     method: 'PUT',
     headers: {
-      'Content-Type': 'application/json',
+      'Content-Type': contentType,
       'X-Amz-Content-Sha256': payloadHash,
       'X-Amz-Date': amzDate,
       Authorization: authorization,
@@ -234,6 +234,40 @@ async function handleUpload(request, env) {
   }
 }
 
+function base64ToBytes(base64) {
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  return bytes
+}
+
+// Generic batch file upload used by the Daily Bytes publish flow (day json,
+// month json, root json, ver json, month zip). Business logic (merging,
+// versioning) lives entirely in the frontend — this just signs and writes
+// whatever files it's given.
+async function handlePublish(request, env) {
+  const { files } = await request.json()
+
+  const results = []
+  for (const file of files) {
+    try {
+      const body = file.bodyBase64 ? base64ToBytes(file.bodyBase64) : file.body
+      await putObjectToSpaces({
+        accessKey: env.DO_SPACES_KEY,
+        secretKey: env.DO_SPACES_SECRET,
+        key: file.key,
+        body,
+        contentType: file.contentType || 'application/json',
+      })
+      results.push({ key: file.key, success: true })
+    } catch (err) {
+      results.push({ key: file.key, success: false, error: err.message })
+    }
+  }
+
+  return json(env, { results })
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') {
@@ -248,6 +282,9 @@ export default {
       }
       if (request.method === 'POST' && url.pathname === '/upload') {
         return await handleUpload(request, env)
+      }
+      if (request.method === 'POST' && url.pathname === '/publish') {
+        return await handlePublish(request, env)
       }
       return json(env, { error: 'Not found' }, 404)
     } catch (err) {
