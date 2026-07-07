@@ -132,6 +132,32 @@
   max-width: 1080px;
 }
 
+/* Desktop/laptop: inputs and actions (.form-card) on the left,
+   generated previews (.result-card) on the right. The welcome banner
+   spans both columns. Below this width everything just stacks in
+   source order, same as before. */
+@media (min-width: 1200px) {
+  .page {
+    display: grid;
+    grid-template-columns: minmax(320px, 440px) 1fr;
+    align-items: start;
+    gap: 20px;
+    max-width: 1500px;
+  }
+
+  .page > .welcome-card {
+    grid-column: 1 / -1;
+  }
+
+  .page > .form-card {
+    grid-column: 1;
+  }
+
+  .page > .result-card {
+    grid-column: 2;
+  }
+}
+
 .welcome-card {
   background: var(--surface);
   border: 1px solid var(--border);
