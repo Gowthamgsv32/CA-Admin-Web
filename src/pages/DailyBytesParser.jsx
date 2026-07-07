@@ -1,7 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
-import { TOPICS_URL, WORKER_URL } from '../config/api'
-import { isoToDMY } from '../utils/dailyBytesPublish'
-import { BYTES_ORDER, buildDayBytesJson, loadStoredVersion, saveStoredVersion } from '../utils/dailyBytesJson'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { DAILY_BYTES_BASE, ROOT_URL, TOPICS_URL, VER_FILE_URL, WORKER_URL } from '../config/api'
+import { buildNextRoot, buildNextVerFile, isoToDMY, monthKeyFromDMY } from '../utils/dailyBytesPublish'
+import {
+  BYTES_ORDER,
+  buildDayBytesJson,
+  loadStoredVersion,
+  mergeBytesMonthJson,
+  saveStoredVersion,
+} from '../utils/dailyBytesJson'
+import { bytesToBase64, createZip } from '../utils/zip'
 
 const CONTENT_TYPES = [
   { value: 'spoken', label: 'Spoken' },
@@ -49,6 +56,16 @@ function dayJsonCacheKey(day) {
   return `dailyBytesDayJson:${day}`
 }
 
+function monthJsonCacheKey(monthKey) {
+  return `dailyBytesMonthJson:${monthKey}`
+}
+
+function zipFileFromMonthJson(monthKey, monthJson) {
+  return createZip([
+    { name: `${monthKey}.json`, data: new TextEncoder().encode(JSON.stringify(monthJson)) },
+  ])
+}
+
 function DailyBytesParser() {
   const [contentType, setContentType] = useState('spoken')
   const [day, setDay] = useState('')
@@ -66,7 +83,18 @@ function DailyBytesParser() {
   const [matchedPhase, setMatchedPhase] = useState('')
 
   const [convertError, setConvertError] = useState('')
+  const [converting, setConverting] = useState(false)
   const [dayJson, setDayJson] = useState(null)
+  const [monthJson, setMonthJson] = useState(null)
+  const [zipBytes, setZipBytes] = useState(null)
+
+  const [currentRoot, setCurrentRoot] = useState(null)
+  const [currentVerFile, setCurrentVerFile] = useState(null)
+  const [loadingServerState, setLoadingServerState] = useState(true)
+  const [serverStateError, setServerStateError] = useState('')
+
+  const [publishing, setPublishing] = useState(false)
+  const [publishStatus, setPublishStatus] = useState(null)
 
   const iframeRef = useRef(null)
 
@@ -84,6 +112,44 @@ function DailyBytesParser() {
       cancelled = true
     }
   }, [])
+
+  async function loadServerState() {
+    setLoadingServerState(true)
+    setServerStateError('')
+    try {
+      const [rootRes, verRes] = await Promise.all([
+        fetch(ROOT_URL, { cache: 'no-store' }),
+        fetch(VER_FILE_URL, { cache: 'no-store' }),
+      ])
+      if (!rootRes.ok) throw new Error(`Failed to load root.json (${rootRes.status})`)
+      if (!verRes.ok) throw new Error(`Failed to load ver.json (${verRes.status})`)
+      setCurrentRoot(await rootRes.json())
+      setCurrentVerFile(await verRes.json())
+    } catch (err) {
+      setServerStateError(err.message)
+    } finally {
+      setLoadingServerState(false)
+    }
+  }
+
+  useEffect(() => {
+    loadServerState()
+  }, [])
+
+  const selectedDateDMY = useMemo(() => (date ? isoToDMY(date) : ''), [date])
+  const monthKey = useMemo(() => (selectedDateDMY ? monthKeyFromDMY(selectedDateDMY) : ''), [selectedDateDMY])
+
+  const nextVerFile = useMemo(() => {
+    if (!currentVerFile || !selectedDateDMY) return null
+    return buildNextVerFile({ currentVerFile, selectedDateDMY })
+  }, [currentVerFile, selectedDateDMY])
+
+  // Every day always contributes exactly 4 bytes (grammer/spoken/phrase/word),
+  // so the month's running "N Daily Bytes" count always advances by 4.
+  const nextRootResult = useMemo(() => {
+    if (!currentRoot || !selectedDateDMY) return null
+    return buildNextRoot({ currentRoot, selectedDateDMY, casCount: 4, baseUrl: DAILY_BYTES_BASE })
+  }, [currentRoot, selectedDateDMY])
 
   useEffect(() => {
     setMatchedPhase('')
@@ -147,6 +213,27 @@ function DailyBytesParser() {
     }
   }, [day])
 
+  // The month JSON (and its zip, rebuilt from it) is keyed on the selected
+  // date's month, so it persists across day/category switches within the
+  // same month and reloads from localStorage on a fresh page load.
+  useEffect(() => {
+    setMonthJson(null)
+    setZipBytes(null)
+
+    if (!monthKey) return
+
+    try {
+      const raw = localStorage.getItem(monthJsonCacheKey(monthKey))
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        setMonthJson(parsed)
+        setZipBytes(zipFileFromMonthJson(monthKey, parsed))
+      }
+    } catch {
+      // localStorage unavailable/corrupt — Convert JSON will rebuild it.
+    }
+  }, [monthKey])
+
   useEffect(() => {
     const iframe = iframeRef.current
     if (!iframe || !resultHtml) return
@@ -205,9 +292,12 @@ function DailyBytesParser() {
     }
   }
 
-  function handleConvert() {
+  async function handleConvert() {
     setConvertError('')
     setDayJson(null)
+    setMonthJson(null)
+    setZipBytes(null)
+    setPublishStatus(null)
 
     if (!day.trim()) {
       setConvertError('Please enter a day.')
@@ -230,18 +320,49 @@ function DailyBytesParser() {
       return
     }
 
-    const dateDMY = isoToDMY(date)
-    const ver = loadStoredVersion() + 1000
-    const combined = buildDayBytesJson({ dateDMY, ver, resultsByType })
-
+    setConverting(true)
     try {
-      localStorage.setItem(dayJsonCacheKey(day), JSON.stringify(combined))
-    } catch {
-      // localStorage unavailable/full — the preview below still shows the result.
-    }
-    saveStoredVersion(ver)
+      const dateDMY = isoToDMY(date)
+      const dayMonthKey = monthKeyFromDMY(dateDMY)
+      const provisionalVer = loadStoredVersion() + 1000
+      const provisionalDay = buildDayBytesJson({ dateDMY, ver: provisionalVer, resultsByType })
 
-    setDayJson(combined)
+      let currentMonthJson = null
+      const monthRes = await fetch(`${DAILY_BYTES_BASE}/${dayMonthKey}.json`, { cache: 'no-store' })
+      if (monthRes.ok) {
+        currentMonthJson = await monthRes.json()
+      } else if (monthRes.status !== 404) {
+        throw new Error(`Failed to load ${dayMonthKey}.json (${monthRes.status})`)
+      }
+
+      const { bytes: mergedBytes, ver: finalVer } = mergeBytesMonthJson({
+        currentMonthJson,
+        dayBytes: provisionalDay.bytes,
+        fallbackVer: provisionalVer,
+      })
+
+      const finalDayJson = {
+        bytes: provisionalDay.bytes.map((entry) => ({ ...entry, ver: finalVer })),
+      }
+      const mergedMonthJson = { bytes: mergedBytes }
+      const zipData = zipFileFromMonthJson(dayMonthKey, mergedMonthJson)
+
+      try {
+        localStorage.setItem(dayJsonCacheKey(day), JSON.stringify(finalDayJson))
+        localStorage.setItem(monthJsonCacheKey(dayMonthKey), JSON.stringify(mergedMonthJson))
+      } catch {
+        // localStorage unavailable/full — the previews below still show the result.
+      }
+      saveStoredVersion(finalVer)
+
+      setDayJson(finalDayJson)
+      setMonthJson(mergedMonthJson)
+      setZipBytes(zipData)
+    } catch (err) {
+      setConvertError(`Failed to build month JSON: ${err.message}`)
+    } finally {
+      setConverting(false)
+    }
   }
 
   function handleDownloadDayJson() {
@@ -254,6 +375,38 @@ function DailyBytesParser() {
     const a = document.createElement('a')
     a.href = url
     a.download = `${dateDMY}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+
+    URL.revokeObjectURL(url)
+  }
+
+  function handleDownloadMonthJson() {
+    if (!monthJson || !monthKey) return
+
+    const blob = new Blob([JSON.stringify(monthJson, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${monthKey}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+
+    URL.revokeObjectURL(url)
+  }
+
+  function handleDownloadZip() {
+    if (!zipBytes || !monthKey) return
+
+    const blob = new Blob([zipBytes], { type: 'application/zip' })
+    const url = URL.createObjectURL(blob)
+
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${monthKey}.zip`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
@@ -301,6 +454,63 @@ function DailyBytesParser() {
       }
     } catch (err) {
       setUploadStatus({ type: 'error', message: `Upload error: ${err.message}` })
+    }
+  }
+
+  const publishReady = Boolean(nextVerFile && nextRootResult && dayJson && monthJson && zipBytes)
+
+  async function handlePublishAll() {
+    setPublishStatus(null)
+
+    if (!selectedDateDMY || !monthKey) {
+      setPublishStatus({ type: 'error', message: 'Please choose a date.' })
+      return
+    }
+    if (!nextVerFile || !nextRootResult) {
+      setPublishStatus({ type: 'error', message: 'Version/root file not ready — check Server State.' })
+      return
+    }
+    if (!dayJson || !monthJson || !zipBytes) {
+      setPublishStatus({ type: 'error', message: 'Click "Convert JSON" first to prepare the day, month and zip files.' })
+      return
+    }
+
+    setPublishing(true)
+    try {
+      const files = [
+        { key: 'Daily_Bytes/daily-bytes-ver.json', body: JSON.stringify(nextVerFile) },
+        { key: 'Daily_Bytes/daily-bytes-root.json', body: JSON.stringify(nextRootResult.root) },
+        { key: `Daily_Bytes/${selectedDateDMY}.json`, body: JSON.stringify(dayJson) },
+        { key: `Daily_Bytes/${monthKey}.json`, body: JSON.stringify(monthJson) },
+        {
+          key: `Daily_Bytes/${monthKey}.zip`,
+          bodyBase64: bytesToBase64(zipBytes),
+          contentType: 'application/zip',
+        },
+      ]
+
+      const res = await fetch(`${WORKER_URL}/publish`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files }),
+      })
+
+      const result = await res.json()
+      const failed = (result.results || []).filter((r) => !r.success)
+
+      if (failed.length > 0) {
+        setPublishStatus({
+          type: 'error',
+          message: `Failed to upload: ${failed.map((f) => `${f.key} (${f.error})`).join('; ')}`,
+        })
+      } else {
+        setPublishStatus({ type: 'success', message: `Published all 5 files for ${selectedDateDMY}.` })
+        await loadServerState()
+      }
+    } catch (err) {
+      setPublishStatus({ type: 'error', message: `Publish error: ${err.message}` })
+    } finally {
+      setPublishing(false)
     }
   }
 
@@ -361,8 +571,8 @@ function DailyBytesParser() {
         {convertError && <div className="alert alert-error">{convertError}</div>}
 
         <div className="form-actions">
-          <button type="button" className="btn btn-ghost" onClick={handleConvert}>
-            Convert JSON
+          <button type="button" className="btn btn-ghost" onClick={handleConvert} disabled={converting}>
+            {converting ? 'Converting…' : 'Convert JSON'}
           </button>
           <button
             type="button"
@@ -389,6 +599,90 @@ function DailyBytesParser() {
         </section>
       )}
 
+      {monthJson && (
+        <section className="result-card">
+          <div className="result-toolbar">
+            <h3>Month JSON — {monthKey}</h3>
+            <div className="result-actions">
+              <button type="button" className="btn btn-ghost" onClick={handleDownloadMonthJson}>
+                Download JSON
+              </button>
+              <button type="button" className="btn btn-ghost" onClick={handleDownloadZip} disabled={!zipBytes}>
+                Download ZIP
+              </button>
+            </div>
+          </div>
+          <p className="field-hint" style={{ padding: '0 20px 12px' }}>
+            {monthJson.bytes.length} total bytes for {monthKey}.
+          </p>
+          <pre className="json-preview">{JSON.stringify(monthJson, null, 2)}</pre>
+        </section>
+      )}
+
+      <section className="form-card">
+        <h3>Publish to Server</h3>
+        <p className="field-hint">All 5 files must be ready before uploading with public access.</p>
+
+        <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, color: 'var(--text-muted)' }}>
+          <li>{nextVerFile ? '✅' : '⬜'} Version file (daily-bytes-ver.json)</li>
+          <li>{nextRootResult ? '✅' : '⬜'} Root file (daily-bytes-root.json)</li>
+          <li>{dayJson ? '✅' : '⬜'} Day JSON ({selectedDateDMY || 'no date selected'})</li>
+          <li>{monthJson ? '✅' : '⬜'} Month JSON ({monthKey || 'no date selected'})</li>
+          <li>{zipBytes ? '✅' : '⬜'} Month ZIP ({monthKey ? `${monthKey}.zip` : 'no date selected'})</li>
+        </ul>
+
+        {publishStatus && (
+          <div className={`alert ${publishStatus.type === 'success' ? 'alert-success' : 'alert-error'}`}>
+            {publishStatus.message}
+          </div>
+        )}
+
+        <div className="form-actions">
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={handlePublishAll}
+            disabled={!publishReady || publishing}
+          >
+            {publishing ? 'Uploading…' : 'Upload JSON'}
+          </button>
+        </div>
+      </section>
+
+      <section className="form-card">
+        <h3>Server State</h3>
+
+        {loadingServerState && <p className="field-hint">Loading root.json and daily-bytes-ver.json…</p>}
+        {serverStateError && <div className="alert alert-error">{serverStateError}</div>}
+
+        {!loadingServerState && currentVerFile && currentRoot && (
+          <>
+            <p className="field-hint">
+              Version file: v{currentVerFile.ver} ({currentVerFile.date})
+              {nextVerFile && ` → v${nextVerFile.ver} (${nextVerFile.date})`}
+            </p>
+            <p className="field-hint">
+              Root: v{currentRoot.ver}, last updated {currentRoot.date}
+              {nextRootResult && ` → v${nextRootResult.root.ver}, ${nextRootResult.root.date}`}
+            </p>
+            {currentRoot.av_mos?.[0] && (
+              <p className="field-hint">
+                Latest month "{currentRoot.av_mos[0].title}": {currentRoot.av_mos[0].desc} (v
+                {currentRoot.av_mos[0].ver})
+                {nextRootResult &&
+                  ` → ${nextRootResult.root.av_mos[nextRootResult.monthEntryIndex].desc} (v${nextRootResult.root.av_mos[nextRootResult.monthEntryIndex].ver})`}
+              </p>
+            )}
+          </>
+        )}
+
+        <div className="form-actions">
+          <button type="button" className="btn btn-ghost" onClick={loadServerState} disabled={loadingServerState}>
+            Refresh
+          </button>
+        </div>
+      </section>
+
       {(loading || resultHtml) && (
         <section className="result-card">
           <div className="result-toolbar">
@@ -408,7 +702,7 @@ function DailyBytesParser() {
                 onClick={handleUpload}
                 disabled={!resultJson}
               >
-                Upload JSON
+                Upload Category JSON
               </button>
             </div>
           </div>
