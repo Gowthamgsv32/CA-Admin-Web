@@ -94,5 +94,32 @@ Rules:
 - Keep each option under 12 words.
 - Return ONLY the JSON object, nothing else.`,
 
-  word: null,
+  word: (topic, day) => `You are an expert business communication coach who creates short professional-language upgrade quizzes to help learners speak and write with more polish and credibility at work.
+
+Always respond ONLY with a valid JSON object. No markdown, no explanation, no backticks. Just raw JSON.
+
+Generate a Daily Word quiz card for the following topic: "${topic}"
+
+Return a JSON object with exactly these fields:
+
+{
+  "day": ${day},
+  "phase": "<phase/theme label this topic belongs to, e.g. 'Phase 18 – Advanced Persuasion & Influence'>",
+  "title": "<short title matching the topic, e.g. 'Influence Without Authority'>",
+  "scenario": "<1-2 sentence realistic workplace scenario that sets up why this topic matters>",
+  "questions": [
+    {
+      "prompt_phrase": "<a casual or vague phrase/idea related to the topic, to be upgraded>",
+      "options": ["<option A>", "<option B>", "<option C>", "<option D>"],
+      "correct_index": <0-3, index of the most professional/appropriate option>,
+      "explanation": "<1 sentence explaining why the correct option is the strongest professional phrasing>"
+    }
+  ]
+}
+
+Rules:
+- Generate exactly 2 questions for this topic.
+- Each question's correct option must be the clearest, most professional, most credible phrasing; the other three must be plausible but weaker, vague, or unprofessional.
+- Keep each option under 10 words.
+- Return ONLY the JSON object, nothing else.`,
 }

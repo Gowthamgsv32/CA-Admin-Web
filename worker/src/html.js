@@ -354,3 +354,158 @@ explanation.style.display="block";
 </body>
 </html>`
 }
+
+export function buildWordHtml({ day, phase, title, scenario, questions }) {
+  const list = questions || []
+
+  const questionsHtml = list
+    .map((q, i) => {
+      const idx = i + 1
+      const options = q.options || []
+      const optionsHtml = options
+        .map((opt, j) => {
+          const letter = String.fromCharCode(65 + j)
+          const isCorrect = j === q.correct_index
+          return `<div class="option" onclick="check(this,${isCorrect},${idx})">${letter}) ${escapeHtml(opt)}</div>`
+        })
+        .join('\n')
+
+      return `
+<div class="q-block">
+<div class="question">
+What is the best professional way to say:<br>
+“${escapeHtml(q.prompt_phrase)}”?
+</div>
+
+${optionsHtml}
+
+<div id="exp${idx}" class="explanation">
+✔ <b>${escapeHtml(options[q.correct_index] ?? '')}</b> = ${escapeHtml(q.explanation)}
+</div>
+</div>`
+    })
+    .join('\n')
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Day ${escapeHtml(day)} – ${escapeHtml(title)}</title>
+
+<style>
+
+body{
+font-family:"Segoe UI",Arial,sans-serif;
+background:#f4f6f9;
+margin:0;
+padding:20px;
+}
+
+.container{
+max-width:760px;
+margin:auto;
+background:white;
+padding:24px;
+border-radius:14px;
+box-shadow:0 4px 18px rgba(0,0,0,0.12);
+}
+
+h2{
+text-align:center;
+}
+
+.phase{
+background:#eef6ff;
+border-left:5px solid #007bff;
+padding:12px;
+border-radius:6px;
+margin-bottom:20px;
+text-align:center;
+font-weight:600;
+}
+
+.scenario{
+background:#fff3cd;
+border-left:4px solid #ffc107;
+padding:14px;
+border-radius:6px;
+margin-bottom:20px;
+}
+
+.question{
+font-weight:600;
+margin-top:18px;
+}
+
+.option{
+background:#f2f2f2;
+padding:11px;
+margin:8px 0;
+border-radius:6px;
+cursor:pointer;
+}
+
+.option.correct{
+background:#d4edda;
+color:#155724;
+}
+
+.option.wrong{
+background:#f8d7da;
+color:#721c24;
+}
+
+.explanation{
+display:none;
+background:#e9f7ef;
+border-left:4px solid #28a745;
+padding:12px;
+margin-top:10px;
+border-radius:6px;
+}
+
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<h2>🌟 Day ${escapeHtml(day)} – ${escapeHtml(title)}</h2>
+
+<div class="phase">
+${escapeHtml(phase)}
+</div>
+
+<div class="scenario">
+${escapeHtml(scenario)}
+</div>
+${questionsHtml}
+</div>
+
+<script>
+
+function check(el,isCorrect,id){
+
+let options = el.parentNode.querySelectorAll(".option");
+
+options.forEach(o=>{
+o.style.pointerEvents="none";
+});
+
+if(isCorrect){
+el.classList.add("correct");
+}else{
+el.classList.add("wrong");
+}
+
+document.getElementById("exp"+id).style.display="block";
+
+}
+
+</script>
+
+</body>
+</html>`
+}
