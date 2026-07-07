@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { WORKER_URL } from '../config/api'
+import { TOPICS_URL, WORKER_URL } from '../config/api'
 
 const CONTENT_TYPES = [
   { value: 'word', label: 'Word' },
@@ -7,6 +7,14 @@ const CONTENT_TYPES = [
   { value: 'spoken', label: 'Spoken' },
   { value: 'phrase', label: 'Phrase' },
 ]
+
+// topics.json keys its "grammar" list without the typo our valSelect uses elsewhere.
+const TOPICS_KEY_BY_CONTENT_TYPE = {
+  word: 'word',
+  grammer: 'grammar',
+  spoken: 'spoken',
+  phrase: 'phrase',
+}
 
 function todayISO() {
   return new Date().toISOString().split('T')[0]
@@ -24,7 +32,42 @@ function DailyBytesParser() {
   const [resultJson, setResultJson] = useState(null)
   const [uploadStatus, setUploadStatus] = useState(null)
 
+  const [topicsData, setTopicsData] = useState(null)
+  const [matchedPhase, setMatchedPhase] = useState('')
+
   const iframeRef = useRef(null)
+
+  useEffect(() => {
+    let cancelled = false
+
+    fetch(TOPICS_URL)
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled) setTopicsData(data)
+      })
+      .catch((err) => console.error('Failed to load topics.json:', err))
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    setMatchedPhase('')
+
+    if (!topicsData || !contentType || !day.trim()) return
+
+    const dayNum = Number(day)
+    if (!Number.isFinite(dayNum)) return
+
+    const key = TOPICS_KEY_BY_CONTENT_TYPE[contentType]
+    const entry = topicsData[key]?.find((item) => item.day === dayNum)
+
+    if (entry) {
+      setTopic(entry.topic)
+      setMatchedPhase(entry.phase)
+    }
+  }, [day, contentType, topicsData])
 
   useEffect(() => {
     const iframe = iframeRef.current
@@ -170,6 +213,7 @@ function DailyBytesParser() {
             onChange={(e) => setTopic(e.target.value)}
             placeholder="What should today's tip be about?"
           />
+          {matchedPhase && <span className="field-hint">Prefilled from Day {day} · {matchedPhase}</span>}
         </label>
 
         {error && <div className="alert alert-error">{error}</div>}
