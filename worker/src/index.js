@@ -1,6 +1,13 @@
 import { PROMPTS } from './prompts.js'
-import { buildResultHtml } from './html.js'
+import { buildResultHtml, buildGrammarHtml, buildPhraseHtml, buildWordHtml } from './html.js'
 import { putObjectToSpaces } from './spaces.js'
+
+const HTML_BUILDERS = {
+  spoken: buildResultHtml,
+  grammer: buildGrammarHtml,
+  phrase: buildPhraseHtml,
+  word: buildWordHtml,
+}
 
 function corsHeaders(env) {
   return {
@@ -31,7 +38,7 @@ async function handleGenerate(request, env) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: promptBuilder(prompt) }] }],
+        contents: [{ parts: [{ text: promptBuilder(prompt, day) }] }],
         generationConfig: { temperature: 0.7, maxOutputTokens: 1000 },
       }),
     }
@@ -52,7 +59,8 @@ async function handleGenerate(request, env) {
     return json(env, { error: `Failed to parse AI response: ${rawText}` }, 502)
   }
 
-  const html = buildResultHtml({ day, ...data })
+  // The day number is always ours, never trust the model to echo it back correctly.
+  const html = HTML_BUILDERS[valSelect]({ ...data, day })
 
   return json(env, { html, json: data })
 }
