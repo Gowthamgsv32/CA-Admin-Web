@@ -66,6 +66,20 @@ function zipFileFromMonthJson(monthKey, monthJson) {
   ])
 }
 
+function downloadBlob(data, filename, mimeType) {
+  const blob = new Blob([data], { type: mimeType })
+  const url = URL.createObjectURL(blob)
+
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+
+  URL.revokeObjectURL(url)
+}
+
 function DailyBytesParser() {
   const [contentType, setContentType] = useState('spoken')
   const [day, setDay] = useState('')
@@ -87,6 +101,10 @@ function DailyBytesParser() {
   const [dayJson, setDayJson] = useState(null)
   const [monthJson, setMonthJson] = useState(null)
   const [zipBytes, setZipBytes] = useState(null)
+
+  const [htmlPreviewExpanded, setHtmlPreviewExpanded] = useState(true)
+  const [dayJsonExpanded, setDayJsonExpanded] = useState(true)
+  const [monthJsonExpanded, setMonthJsonExpanded] = useState(true)
 
   const [currentRoot, setCurrentRoot] = useState(null)
   const [currentVerFile, setCurrentVerFile] = useState(null)
@@ -175,6 +193,7 @@ function DailyBytesParser() {
   useEffect(() => {
     setUploadStatus(null)
     setError('')
+    setHtmlPreviewExpanded(true)
 
     if (!contentType || !day.trim()) {
       setResultHtml('')
@@ -199,6 +218,7 @@ function DailyBytesParser() {
   // own cache lookup keyed only on `day`.
   useEffect(() => {
     setConvertError('')
+    setDayJsonExpanded(true)
 
     if (!day.trim()) {
       setDayJson(null)
@@ -219,6 +239,7 @@ function DailyBytesParser() {
   useEffect(() => {
     setMonthJson(null)
     setZipBytes(null)
+    setMonthJsonExpanded(true)
 
     if (!monthKey) return
 
@@ -236,7 +257,7 @@ function DailyBytesParser() {
 
   useEffect(() => {
     const iframe = iframeRef.current
-    if (!iframe || !resultHtml) return
+    if (!iframe || !resultHtml || !htmlPreviewExpanded) return
 
     const doc = iframe.contentDocument
     doc.open()
@@ -248,7 +269,7 @@ function DailyBytesParser() {
     }
     iframe.onload = resize
     resize()
-  }, [resultHtml])
+  }, [resultHtml, htmlPreviewExpanded])
 
   async function handleGenerate() {
     setUploadStatus(null)
@@ -298,6 +319,8 @@ function DailyBytesParser() {
     setMonthJson(null)
     setZipBytes(null)
     setPublishStatus(null)
+    setDayJsonExpanded(true)
+    setMonthJsonExpanded(true)
 
     if (!day.trim()) {
       setConvertError('Please enter a day.')
@@ -367,72 +390,24 @@ function DailyBytesParser() {
 
   function handleDownloadDayJson() {
     if (!dayJson) return
-
-    const dateDMY = isoToDMY(date)
-    const blob = new Blob([JSON.stringify(dayJson, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${dateDMY}.json`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-
-    URL.revokeObjectURL(url)
+    downloadBlob(JSON.stringify(dayJson, null, 2), `${isoToDMY(date)}.json`, 'application/json')
   }
 
   function handleDownloadMonthJson() {
     if (!monthJson || !monthKey) return
-
-    const blob = new Blob([JSON.stringify(monthJson, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${monthKey}.json`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-
-    URL.revokeObjectURL(url)
+    downloadBlob(JSON.stringify(monthJson, null, 2), `${monthKey}.json`, 'application/json')
   }
 
   function handleDownloadZip() {
     if (!zipBytes || !monthKey) return
-
-    const blob = new Blob([zipBytes], { type: 'application/zip' })
-    const url = URL.createObjectURL(blob)
-
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${monthKey}.zip`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-
-    URL.revokeObjectURL(url)
+    downloadBlob(zipBytes, `${monthKey}.zip`, 'application/zip')
   }
 
   function handleDownload() {
     if (!resultJson) return
 
     const [year, month, dayPart] = date.split('-')
-    const fileName = `${dayPart}-${month}-${year}.json`
-
-    const blob = new Blob([JSON.stringify(resultJson, null, 2)], {
-      type: 'application/json',
-    })
-    const url = URL.createObjectURL(blob)
-
-    const a = document.createElement('a')
-    a.href = url
-    a.download = fileName
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-
-    URL.revokeObjectURL(url)
+    downloadBlob(JSON.stringify(resultJson, null, 2), `${dayPart}-${month}-${year}.json`, 'application/json')
   }
 
   async function handleUpload() {
@@ -458,6 +433,16 @@ function DailyBytesParser() {
   }
 
   const publishReady = Boolean(nextVerFile && nextRootResult && dayJson && monthJson && zipBytes)
+
+  function handleDownloadAllFiles() {
+    if (!publishReady) return
+
+    downloadBlob(JSON.stringify(nextVerFile, null, 2), 'daily-bytes-ver.json', 'application/json')
+    downloadBlob(JSON.stringify(nextRootResult.root, null, 2), 'daily-bytes-root.json', 'application/json')
+    downloadBlob(JSON.stringify(dayJson, null, 2), `${selectedDateDMY}.json`, 'application/json')
+    downloadBlob(JSON.stringify(monthJson, null, 2), `${monthKey}.json`, 'application/json')
+    downloadBlob(zipBytes, `${monthKey}.zip`, 'application/zip')
+  }
 
   async function handlePublishAll() {
     setPublishStatus(null)
@@ -590,12 +575,20 @@ function DailyBytesParser() {
           <div className="result-toolbar">
             <h3>Combined Day JSON</h3>
             <div className="result-actions">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setDayJsonExpanded((v) => !v)}
+                aria-expanded={dayJsonExpanded}
+              >
+                {dayJsonExpanded ? 'Collapse' : 'Expand'}
+              </button>
               <button type="button" className="btn btn-ghost" onClick={handleDownloadDayJson}>
                 Download JSON
               </button>
             </div>
           </div>
-          <pre className="json-preview">{JSON.stringify(dayJson, null, 2)}</pre>
+          {dayJsonExpanded && <pre className="json-preview">{JSON.stringify(dayJson, null, 2)}</pre>}
         </section>
       )}
 
@@ -604,6 +597,14 @@ function DailyBytesParser() {
           <div className="result-toolbar">
             <h3>Month JSON — {monthKey}</h3>
             <div className="result-actions">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setMonthJsonExpanded((v) => !v)}
+                aria-expanded={monthJsonExpanded}
+              >
+                {monthJsonExpanded ? 'Collapse' : 'Expand'}
+              </button>
               <button type="button" className="btn btn-ghost" onClick={handleDownloadMonthJson}>
                 Download JSON
               </button>
@@ -615,7 +616,7 @@ function DailyBytesParser() {
           <p className="field-hint" style={{ padding: '0 20px 12px' }}>
             {monthJson.bytes.length} total bytes for {monthKey}.
           </p>
-          <pre className="json-preview">{JSON.stringify(monthJson, null, 2)}</pre>
+          {monthJsonExpanded && <pre className="json-preview">{JSON.stringify(monthJson, null, 2)}</pre>}
         </section>
       )}
 
@@ -638,6 +639,14 @@ function DailyBytesParser() {
         )}
 
         <div className="form-actions">
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={handleDownloadAllFiles}
+            disabled={!publishReady}
+          >
+            Download All 5 Files
+          </button>
           <button
             type="button"
             className="btn btn-primary"
@@ -688,6 +697,16 @@ function DailyBytesParser() {
           <div className="result-toolbar">
             <h3>Preview{fromCache && !loading && <span className="field-hint"> · loaded from local cache</span>}</h3>
             <div className="result-actions">
+              {!loading && (
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => setHtmlPreviewExpanded((v) => !v)}
+                  aria-expanded={htmlPreviewExpanded}
+                >
+                  {htmlPreviewExpanded ? 'Collapse' : 'Expand'}
+                </button>
+              )}
               <button
                 type="button"
                 className="btn btn-ghost"
@@ -716,7 +735,7 @@ function DailyBytesParser() {
           {loading ? (
             <div className="result-loading">Thinking…</div>
           ) : (
-            <iframe ref={iframeRef} className="result-frame" title="Generated preview" />
+            htmlPreviewExpanded && <iframe ref={iframeRef} className="result-frame" title="Generated preview" />
           )}
         </section>
       )}
