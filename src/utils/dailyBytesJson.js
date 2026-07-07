@@ -54,6 +54,30 @@ export function buildDayBytesJson({ dateDMY, ver, resultsByType }) {
   return { bytes }
 }
 
+// Merges a day's 4 bytes objects into the month's existing bytes array.
+// Every object across the whole month shares one version number, so every
+// existing entry gets bumped +1000 right alongside the newly appended day
+// entries, which are re-stamped to the same new version (their provisional
+// version from buildDayBytesJson is discarded in favor of this authoritative
+// one, since the month file fetched from the server is the source of truth,
+// not whatever the browser's local counter happened to guess).
+export function mergeBytesMonthJson({ currentMonthJson, dayBytes, fallbackVer }) {
+  const existing = currentMonthJson?.bytes || []
+
+  if (existing.length === 0) {
+    const restampedDay = dayBytes.map((entry) => ({ ...entry, ver: fallbackVer }))
+    return { bytes: restampedDay, ver: fallbackVer }
+  }
+
+  const existingVer = Number(existing[existing.length - 1].ver)
+  const newVer = existingVer + 1000
+
+  const bumped = existing.map((entry) => ({ ...entry, ver: newVer }))
+  const restampedDay = dayBytes.map((entry) => ({ ...entry, ver: newVer }))
+
+  return { bytes: [...bumped, ...restampedDay], ver: newVer }
+}
+
 export function loadStoredVersion() {
   try {
     const raw = localStorage.getItem(VERSION_STORAGE_KEY)

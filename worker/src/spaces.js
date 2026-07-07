@@ -27,7 +27,14 @@ function toHex(buf) {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
-export async function putObjectToSpaces({ accessKey, secretKey, key, body, contentType = 'application/json' }) {
+export async function putObjectToSpaces({
+  accessKey,
+  secretKey,
+  key,
+  body,
+  contentType = 'application/json',
+  acl = 'public-read',
+}) {
   const path = `/${BUCKET}/${key}`
   const now = new Date()
   const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '')
@@ -38,9 +45,10 @@ export async function putObjectToSpaces({ accessKey, secretKey, key, body, conte
   const canonicalHeaders =
     `content-type:${contentType}\n` +
     `host:${HOST}\n` +
+    `x-amz-acl:${acl}\n` +
     `x-amz-content-sha256:${payloadHash}\n` +
     `x-amz-date:${amzDate}\n`
-  const signedHeaders = 'content-type;host;x-amz-content-sha256;x-amz-date'
+  const signedHeaders = 'content-type;host;x-amz-acl;x-amz-content-sha256;x-amz-date'
 
   const canonicalRequest = ['PUT', path, '', canonicalHeaders, signedHeaders, payloadHash].join('\n')
 
@@ -66,6 +74,7 @@ export async function putObjectToSpaces({ accessKey, secretKey, key, body, conte
     method: 'PUT',
     headers: {
       'Content-Type': contentType,
+      'X-Amz-ACL': acl,
       'X-Amz-Content-Sha256': payloadHash,
       'X-Amz-Date': amzDate,
       Authorization: authorization,
