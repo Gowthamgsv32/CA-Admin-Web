@@ -24,6 +24,55 @@ function json(env, data, status = 200) {
   })
 }
 
+// GEMINI_API_KEY may hold one key or a comma-separated list. Keeping the
+// same variable name means adding more keys is just editing its value in
+// the Cloudflare dashboard — no new variable to wire up.
+function parseApiKeys(raw) {
+  return (raw || '')
+    .split(',')
+    .map((key) => key.trim())
+    .filter(Boolean)
+}
+
+// Tries each key in order, moving on to the next only when the current one
+// is rate-limited (HTTP 429). Any other response (success or a real error)
+// is returned immediately.
+async function callGeminiWithFallback(promptText, apiKeys) {
+  let lastError = null
+
+  for (const apiKey of apiKeys) {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: promptText }] }],
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 2048,
+            thinkingConfig: { thinkingBudget: 0 },
+          },
+        }),
+      }
+    )
+
+    if (res.status !== 429) {
+      return res
+    }
+
+    let detail = ''
+    try {
+      detail = (await res.json())?.error?.message || ''
+    } catch {
+      // ignore — fall back to the generic message below
+    }
+    lastError = new Error(detail || 'Rate limit exceeded for this Gemini API key.')
+  }
+
+  throw lastError || new Error('No Gemini API keys configured.')
+}
+
 async function handleGenerate(request, env) {
   const { prompt, day, valSelect } = await request.json()
 
@@ -32,21 +81,17 @@ async function handleGenerate(request, env) {
     return json(env, { error: `No prompt configured for "${valSelect}" yet.` }, 400)
   }
 
-  const geminiRes = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${env.GEMINI_API_KEY}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: promptBuilder(prompt, day) }] }],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 2048,
-          thinkingConfig: { thinkingBudget: 0 },
-        },
-      }),
-    }
-  )
+  const apiKeys = parseApiKeys(env.GEMINI_API_KEY)
+  if (apiKeys.length === 0) {
+    return json(env, { error: 'No Gemini API key configured.' }, 500)
+  }
+
+  let geminiRes
+  try {
+    geminiRes = await callGeminiWithFallback(promptBuilder(prompt, day), apiKeys)
+  } catch (err) {
+    return json(env, { error: `All Gemini API keys are rate-limited: ${err.message}` }, 429)
+  }
 
   const geminiBody = await geminiRes.json()
   if (geminiBody.error) {
