@@ -3,4 +3,5 @@ export const navItems = [
   { to: '/daily-bytes-parser', label: 'Daily Bytes Parser', icon: 'clock' },
   { to: '/static-parser', label: 'Static Parser', icon: 'filter' },
   { to: '/ca-parser', label: 'CAParser', icon: 'file-text' },
+  { to: '/recall-game-parser', label: 'Recall Game Parser', icon: 'game' },
 ]

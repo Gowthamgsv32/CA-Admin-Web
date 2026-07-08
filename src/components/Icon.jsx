@@ -27,6 +27,15 @@ const paths = {
       <path d="M3 18h18" />
     </>
   ),
+  game: (
+    <>
+      <rect x="2" y="8" width="20" height="10" rx="5" />
+      <path d="M7 11v4" />
+      <path d="M5 13h4" />
+      <circle cx="16" cy="11.5" r="1" />
+      <circle cx="18.5" cy="14" r="1" />
+    </>
+  ),
 }
 
 function Icon({ name, size = 20 }) {

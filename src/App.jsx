@@ -4,6 +4,7 @@ import Dashboard from './pages/Dashboard'
 import DailyBytesParser from './pages/DailyBytesParser'
 import StaticParser from './pages/StaticParser'
 import CAParser from './pages/CAParser'
+import RecallGameParser from './pages/RecallGameParser'
 import './App.css'
 
 function App() {
@@ -14,6 +15,7 @@ function App() {
         <Route path="daily-bytes-parser" element={<DailyBytesParser />} />
         <Route path="static-parser" element={<StaticParser />} />
         <Route path="ca-parser" element={<CAParser />} />
+        <Route path="recall-game-parser" element={<RecallGameParser />} />
       </Route>
     </Routes>
   )
