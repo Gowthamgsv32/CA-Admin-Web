@@ -6,6 +6,7 @@ const descriptions = {
   '/daily-bytes-parser': 'Generate and publish daily English-learning content with Gemini.',
   '/static-parser': 'Run static analysis parsing on uploaded datasets.',
   '/ca-parser': 'Extract and validate CA-specific document data.',
+  '/recall-game-parser': 'Generate and publish recall game content.',
 }
 
 const tools = navItems.filter((item) => item.to !== '/')

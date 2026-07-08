@@ -8,3 +8,5 @@ export const DAILY_BYTES_BASE = 'https://healthappobjects.ams3.cdn.digitaloceans
 export const ROOT_URL = `${DAILY_BYTES_BASE}/daily-bytes-root.json`
 
 export const VER_FILE_URL = `${DAILY_BYTES_BASE}/daily-bytes-ver.json`
+
+export const CURRENT_AFFAIRS_BASE = 'https://healthappobjects.ams3.cdn.digitaloceanspaces.com/CurrentAffairs'
