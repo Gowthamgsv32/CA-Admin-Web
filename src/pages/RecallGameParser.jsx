@@ -1,6 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CURRENT_AFFAIRS_BASE } from '../config/api'
+import { CURRENT_AFFAIRS_BASE, RECALL_GAME_BASE, RECALL_GAME_ROOT_URL, WORKER_URL } from '../config/api'
+import { isoToDMY, monthKeyFromDMY } from '../utils/dailyBytesPublish'
+import { buildTopicsJson, loadStoredRecallVersion, saveStoredRecallVersion } from '../utils/recallGameJson'
+import { buildNextRecallRoot, mergeTopicsMonthJson } from '../utils/recallGamePublish'
+import { bytesToBase64, createZip } from '../utils/zip'
+import { downloadBlob } from '../utils/download'
 import MultiSelectDropdown from '../components/MultiSelectDropdown'
+
+function zipFileFromMonthJson(monthKey, monthJson) {
+  return createZip([
+    { name: `${monthKey}.json`, data: new TextEncoder().encode(JSON.stringify(monthJson)) },
+  ])
+}
 
 const MONTHS = [
   { value: '01', label: 'January' },
@@ -34,6 +45,10 @@ function todayParts() {
   }
 }
 
+function todayISO() {
+  return new Date().toISOString().split('T')[0]
+}
+
 function groupByCategory(cas) {
   const map = new Map()
   for (const item of cas) {
@@ -56,7 +71,24 @@ function RecallGameParser() {
   const [error, setError] = useState('')
 
   const [selectedCategory, setSelectedCategory] = useState('')
-  const [selectedItems, setSelectedItems] = useState({})
+  const [selectedItems, setSelectedItems] = useState([]) // ordered array, oldest selection first
+
+  const [gameDate, setGameDate] = useState(todayISO)
+  const [generating, setGenerating] = useState(false)
+  const [generateProgress, setGenerateProgress] = useState('')
+  const [generateError, setGenerateError] = useState('')
+  const [topicsJson, setTopicsJson] = useState(null)
+  const [topicsExpanded, setTopicsExpanded] = useState(true)
+  const [monthJsonRecall, setMonthJsonRecall] = useState(null)
+  const [monthJsonExpanded, setMonthJsonExpanded] = useState(true)
+  const [zipBytesRecall, setZipBytesRecall] = useState(null)
+
+  const [currentRecallRoot, setCurrentRecallRoot] = useState(null)
+  const [loadingRecallRoot, setLoadingRecallRoot] = useState(true)
+  const [recallRootError, setRecallRootError] = useState('')
+
+  const [publishing, setPublishing] = useState(false)
+  const [publishStatus, setPublishStatus] = useState(null)
 
   const url = `${CURRENT_AFFAIRS_BASE}/${month}-${year}.json`
 
@@ -93,6 +125,24 @@ function RecallGameParser() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [month, year])
 
+  async function loadRecallRootState() {
+    setLoadingRecallRoot(true)
+    setRecallRootError('')
+    try {
+      const res = await fetch(RECALL_GAME_ROOT_URL, { cache: 'no-store' })
+      if (!res.ok) throw new Error(`Failed to load recall-root.json (${res.status})`)
+      setCurrentRecallRoot(await res.json())
+    } catch (err) {
+      setRecallRootError(err.message)
+    } finally {
+      setLoadingRecallRoot(false)
+    }
+  }
+
+  useEffect(() => {
+    loadRecallRootState()
+  }, [])
+
   const categories = useMemo(() => (casData?.cas ? groupByCategory(casData.cas) : []), [casData])
 
   const currentCategoryItems = useMemo(
@@ -101,37 +151,210 @@ function RecallGameParser() {
   )
 
   const categorySelectedValues = useMemo(
-    () => currentCategoryItems.filter((item) => selectedItems[item.id]).map((item) => item.id),
+    () => currentCategoryItems.filter((item) => selectedItems.some((si) => si.id === item.id)).map((item) => item.id),
     [currentCategoryItems, selectedItems]
   )
 
+  // Selections are kept in an ordered array (not keyed by id) because
+  // article ids look like plain integers, and JS objects silently reorder
+  // integer-like keys — which would scramble the batch order used below.
   function handleCategorySelectionChange(newIds) {
     setSelectedItems((prev) => {
-      const next = { ...prev }
-      for (const item of currentCategoryItems) {
-        delete next[item.id]
-      }
+      const withoutCategory = prev.filter((si) => !currentCategoryItems.some((item) => item.id === si.id))
       const newIdSet = new Set(newIds)
-      for (const item of currentCategoryItems) {
-        if (newIdSet.has(item.id)) next[item.id] = item
-      }
-      return next
+      const nowSelected = currentCategoryItems.filter((item) => newIdSet.has(item.id))
+      return [...withoutCategory, ...nowSelected]
     })
   }
 
   function removeSelectedItem(id) {
-    setSelectedItems((prev) => {
-      const next = { ...prev }
-      delete next[id]
-      return next
-    })
+    setSelectedItems((prev) => prev.filter((item) => item.id !== id))
   }
 
   function clearAllSelected() {
-    setSelectedItems({})
+    setSelectedItems([])
   }
 
-  const selectedList = Object.values(selectedItems)
+  const selectedList = selectedItems
+
+  const gameDateDMY = useMemo(() => (gameDate ? isoToDMY(gameDate) : ''), [gameDate])
+
+  // Every selected article contributes exactly one topic, so the month's
+  // running "N Questions available" count always advances by the current
+  // selection size.
+  const nextRootResult = useMemo(() => {
+    if (!currentRecallRoot || !gameDateDMY) return null
+    return buildNextRecallRoot({
+      currentRoot: currentRecallRoot,
+      selectedDateDMY: gameDateDMY,
+      questionCount: selectedList.length,
+      baseUrl: RECALL_GAME_BASE,
+    })
+  }, [currentRecallRoot, gameDateDMY, selectedList.length])
+
+  async function handleGenerateTopics() {
+    setGenerateError('')
+    setTopicsJson(null)
+    setMonthJsonRecall(null)
+    setZipBytesRecall(null)
+    setTopicsExpanded(true)
+    setMonthJsonExpanded(true)
+    setPublishStatus(null)
+
+    if (selectedList.length === 0) {
+      setGenerateError('Select at least one article first.')
+      return
+    }
+    if (!gameDate) {
+      setGenerateError('Please choose a date for this recall game.')
+      return
+    }
+
+    setGenerating(true)
+    try {
+      const generatedList = []
+      for (let i = 0; i < selectedList.length; i++) {
+        const article = selectedList[i]
+        setGenerateProgress(`Generating ${i + 1} of ${selectedList.length}…`)
+
+        const res = await fetch(`${WORKER_URL}/generate-recall`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            article: {
+              title_en: article.title_en,
+              desc_en: article.desc_en,
+              category: article.category,
+              date: article.date,
+            },
+          }),
+        })
+
+        const result = await res.json()
+        if (result.error) throw new Error(`"${article.title_en}": ${result.error}`)
+        generatedList.push(result.data)
+      }
+
+      setGenerateProgress('Merging with month data…')
+
+      const dateDMY = isoToDMY(gameDate)
+      const dayMonthKey = monthKeyFromDMY(dateDMY)
+      const provisionalVer = loadStoredRecallVersion() + 1000
+      const provisionalDay = buildTopicsJson({ dateDMY, ver: provisionalVer, generatedList })
+
+      let currentMonthJson = null
+      const monthRes = await fetch(`${RECALL_GAME_BASE}/${dayMonthKey}.json`, { cache: 'no-store' })
+      if (monthRes.ok) {
+        currentMonthJson = await monthRes.json()
+      } else if (monthRes.status !== 404) {
+        throw new Error(`Failed to load ${dayMonthKey}.json (${monthRes.status})`)
+      }
+
+      const { topics: mergedTopics, ver: finalVer } = mergeTopicsMonthJson({
+        currentMonthJson,
+        dayTopics: provisionalDay.topics,
+        fallbackVer: provisionalVer,
+      })
+
+      const finalDayJson = {
+        topics: provisionalDay.topics.map((entry) => ({ ...entry, ver: finalVer })),
+      }
+      const mergedMonthJson = { topics: mergedTopics }
+      const zipData = zipFileFromMonthJson(dayMonthKey, mergedMonthJson)
+
+      saveStoredRecallVersion(finalVer)
+
+      setTopicsJson(finalDayJson)
+      setMonthJsonRecall(mergedMonthJson)
+      setZipBytesRecall(zipData)
+    } catch (err) {
+      setGenerateError(err.message)
+    } finally {
+      setGenerating(false)
+      setGenerateProgress('')
+    }
+  }
+
+  function handleDownloadTopicsJson() {
+    if (!topicsJson || !gameDateDMY) return
+    downloadBlob(JSON.stringify(topicsJson, null, 2), `${gameDateDMY}.json`, 'application/json')
+  }
+
+  function handleDownloadMonthJsonRecall() {
+    if (!monthJsonRecall || !gameDateDMY) return
+    downloadBlob(JSON.stringify(monthJsonRecall, null, 2), `${monthKeyFromDMY(gameDateDMY)}.json`, 'application/json')
+  }
+
+  function handleDownloadZipRecall() {
+    if (!zipBytesRecall || !gameDateDMY) return
+    downloadBlob(zipBytesRecall, `${monthKeyFromDMY(gameDateDMY)}.zip`, 'application/zip')
+  }
+
+  const publishReady = Boolean(nextRootResult && topicsJson && monthJsonRecall && zipBytesRecall)
+
+  function handleDownloadAllRecallFiles() {
+    if (!publishReady) return
+    const monthKey = monthKeyFromDMY(gameDateDMY)
+    downloadBlob(JSON.stringify(nextRootResult.root, null, 2), 'recall-root.json', 'application/json')
+    downloadBlob(JSON.stringify(topicsJson, null, 2), `${gameDateDMY}.json`, 'application/json')
+    downloadBlob(JSON.stringify(monthJsonRecall, null, 2), `${monthKey}.json`, 'application/json')
+    downloadBlob(zipBytesRecall, `${monthKey}.zip`, 'application/zip')
+  }
+
+  async function handlePublishAllRecall() {
+    setPublishStatus(null)
+
+    if (!gameDateDMY) {
+      setPublishStatus({ type: 'error', message: 'Please choose a date.' })
+      return
+    }
+    if (!nextRootResult) {
+      setPublishStatus({ type: 'error', message: 'Root file not ready — check Server State.' })
+      return
+    }
+    if (!topicsJson || !monthJsonRecall || !zipBytesRecall) {
+      setPublishStatus({ type: 'error', message: 'Click "Generate Recall Game JSON" first.' })
+      return
+    }
+
+    setPublishing(true)
+    try {
+      const monthKey = monthKeyFromDMY(gameDateDMY)
+      const files = [
+        { key: 'Recall-Game/recall-root.json', body: JSON.stringify(nextRootResult.root) },
+        { key: `Recall-Game/${gameDateDMY}.json`, body: JSON.stringify(topicsJson) },
+        { key: `Recall-Game/${monthKey}.json`, body: JSON.stringify(monthJsonRecall) },
+        {
+          key: `Recall-Game/${monthKey}.zip`,
+          bodyBase64: bytesToBase64(zipBytesRecall),
+          contentType: 'application/zip',
+        },
+      ]
+
+      const res = await fetch(`${WORKER_URL}/publish`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files }),
+      })
+
+      const result = await res.json()
+      const failed = (result.results || []).filter((r) => !r.success)
+
+      if (failed.length > 0) {
+        setPublishStatus({
+          type: 'error',
+          message: `Failed to upload: ${failed.map((f) => `${f.key} (${f.error})`).join('; ')}`,
+        })
+      } else {
+        setPublishStatus({ type: 'success', message: `Published all 4 files for ${gameDateDMY}.` })
+        await loadRecallRootState()
+      }
+    } catch (err) {
+      setPublishStatus({ type: 'error', message: `Publish error: ${err.message}` })
+    } finally {
+      setPublishing(false)
+    }
+  }
 
   return (
     <div className="page">
@@ -216,6 +439,102 @@ function RecallGameParser() {
               </label>
             )}
           </section>
+
+          <section className="form-card">
+            <h3>Generate Recall Game</h3>
+            <p className="field-hint">
+              Generates one recall card per selected article — {selectedList.length || 'no'} article
+              {selectedList.length === 1 ? '' : 's'} selected.
+            </p>
+
+            <label className="field">
+              <span>Date</span>
+              <input type="date" value={gameDate} onChange={(e) => setGameDate(e.target.value)} />
+            </label>
+
+            {generateError && <div className="alert alert-error">{generateError}</div>}
+
+            <div className="form-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleGenerateTopics}
+                disabled={generating || selectedList.length === 0}
+              >
+                {generating ? generateProgress || 'Generating…' : 'Generate Recall Game JSON'}
+              </button>
+            </div>
+          </section>
+
+          <section className="form-card">
+            <h3>Publish to Server</h3>
+            <p className="field-hint">All 4 files must be ready before uploading with public access.</p>
+
+            <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, color: 'var(--text-muted)' }}>
+              <li>{nextRootResult ? '✅' : '⬜'} Root file (recall-root.json)</li>
+              <li>{topicsJson ? '✅' : '⬜'} Day JSON ({gameDateDMY || 'no date selected'})</li>
+              <li>{monthJsonRecall ? '✅' : '⬜'} Month JSON ({gameDateDMY ? monthKeyFromDMY(gameDateDMY) : 'no date selected'})</li>
+              <li>
+                {zipBytesRecall ? '✅' : '⬜'} Month ZIP (
+                {gameDateDMY ? `${monthKeyFromDMY(gameDateDMY)}.zip` : 'no date selected'})
+              </li>
+            </ul>
+
+            {publishStatus && (
+              <div className={`alert ${publishStatus.type === 'success' ? 'alert-success' : 'alert-error'}`}>
+                {publishStatus.message}
+              </div>
+            )}
+
+            <div className="form-actions">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={handleDownloadAllRecallFiles}
+                disabled={!publishReady}
+              >
+                Download All 4 Files
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handlePublishAllRecall}
+                disabled={!publishReady || publishing}
+              >
+                {publishing ? 'Uploading…' : 'Upload JSON'}
+              </button>
+            </div>
+          </section>
+
+          <section className="form-card">
+            <h3>Server State</h3>
+
+            {loadingRecallRoot && <p className="field-hint">Loading recall-root.json…</p>}
+            {recallRootError && <div className="alert alert-error">{recallRootError}</div>}
+
+            {!loadingRecallRoot && currentRecallRoot && (
+              <>
+                <p className="field-hint">
+                  Root: v{currentRecallRoot.ver}, last updated {currentRecallRoot.date}
+                  {nextRootResult && ` → v${nextRootResult.root.ver}, ${nextRootResult.root.date}`}
+                </p>
+                {currentRecallRoot.av_mos?.[0] && (
+                  <p className="field-hint">
+                    Latest month "{currentRecallRoot.av_mos[0].title}": {currentRecallRoot.av_mos[0].desc} (v
+                    {currentRecallRoot.av_mos[0].ver})
+                    {nextRootResult &&
+                      ` → ${nextRootResult.root.av_mos[nextRootResult.monthEntryIndex].desc} (v${nextRootResult.root.av_mos[nextRootResult.monthEntryIndex].ver})`}
+                  </p>
+                )}
+              </>
+            )}
+
+            <div className="form-actions">
+              <button type="button" className="btn btn-ghost" onClick={loadRecallRootState} disabled={loadingRecallRoot}>
+                Refresh
+              </button>
+            </div>
+          </section>
         </div>
 
         <div className="page-col page-col-right">
@@ -254,6 +573,56 @@ function RecallGameParser() {
               </div>
             )}
           </section>
+
+          {topicsJson && (
+            <section className="result-card">
+              <div className="result-toolbar">
+                <h3>Recall Game JSON ({topicsJson.topics.length})</h3>
+                <div className="result-actions">
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => setTopicsExpanded((v) => !v)}
+                    aria-expanded={topicsExpanded}
+                  >
+                    {topicsExpanded ? 'Collapse' : 'Expand'}
+                  </button>
+                  <button type="button" className="btn btn-ghost" onClick={handleDownloadTopicsJson}>
+                    Download JSON
+                  </button>
+                </div>
+              </div>
+              {topicsExpanded && <pre className="json-preview">{JSON.stringify(topicsJson, null, 2)}</pre>}
+            </section>
+          )}
+
+          {monthJsonRecall && (
+            <section className="result-card">
+              <div className="result-toolbar">
+                <h3>Month JSON — {gameDateDMY && monthKeyFromDMY(gameDateDMY)}</h3>
+                <div className="result-actions">
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => setMonthJsonExpanded((v) => !v)}
+                    aria-expanded={monthJsonExpanded}
+                  >
+                    {monthJsonExpanded ? 'Collapse' : 'Expand'}
+                  </button>
+                  <button type="button" className="btn btn-ghost" onClick={handleDownloadMonthJsonRecall}>
+                    Download JSON
+                  </button>
+                  <button type="button" className="btn btn-ghost" onClick={handleDownloadZipRecall} disabled={!zipBytesRecall}>
+                    Download ZIP
+                  </button>
+                </div>
+              </div>
+              <p className="field-hint" style={{ padding: '0 20px 12px' }}>
+                {monthJsonRecall.topics.length} total questions for {gameDateDMY && monthKeyFromDMY(gameDateDMY)}.
+              </p>
+              {monthJsonExpanded && <pre className="json-preview">{JSON.stringify(monthJsonRecall, null, 2)}</pre>}
+            </section>
+          )}
         </div>
       </div>
     </div>
