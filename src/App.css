@@ -132,37 +132,56 @@
   max-width: 1080px;
 }
 
-/* Desktop/laptop: inputs and actions (.form-card) on the left,
-   generated previews (.result-card) on the right. The welcome banner
-   spans both columns. Below this width everything just stacks in
-   source order, same as before. */
+/* Below the desktop breakpoint, .page-columns/.page-col are just plain
+   stacking containers — inputs/actions render first (page-col-left),
+   generated previews render below (page-col-right), same as before. */
+.page-columns {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.page-col {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+
+/* Desktop/laptop: inputs and actions on the left, generated previews
+   (HTML preview on top, then day/month JSON) on the right, each column
+   an independent flex flow so one column's height never distorts the
+   other's row spacing. */
 @media (min-width: 1200px) {
   .page {
-    display: grid;
-    grid-template-columns: minmax(320px, 440px) 1fr;
-    align-items: start;
-    gap: 20px;
     max-width: 1500px;
+  }
+
+  .page-columns {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+
+  .page-col-left {
+    flex: 0 0 440px;
+    max-width: 440px;
+  }
+
+  .page-col-right {
+    flex: 1 1 auto;
+    min-width: 0;
   }
 
   /* No preview to show yet — don't reserve the right column's width,
      let the left column use the full page width instead of leaving a
      big empty gap beside it. */
-  .page:not(:has(.result-card)) {
-    grid-template-columns: 1fr;
-    max-width: 1080px;
+  .page-columns:not(:has(.result-card)) .page-col-left {
+    flex: 1 1 auto;
+    max-width: none;
   }
 
-  .page > .welcome-card {
-    grid-column: 1 / -1;
-  }
-
-  .page > .form-card {
-    grid-column: 1;
-  }
-
-  .page > .result-card {
-    grid-column: 2;
+  .page-columns:not(:has(.result-card)) .page-col-right {
+    display: none;
   }
 }
 
