@@ -19,6 +19,7 @@ const HINT_BY_CONTENT_TYPE = {
 export const BYTES_ORDER = ['grammer', 'spoken', 'phrase', 'word']
 
 const VERSION_STORAGE_KEY = 'dailyBytesJsonVersion'
+const LAST_DAY_STORAGE_KEY = 'dailyBytesLastDay'
 
 export function baseIdFromDMY(dateDMY) {
   const digits = dateDMY.replace(/-/g, '')
@@ -91,6 +92,27 @@ export function loadStoredVersion() {
 export function saveStoredVersion(ver) {
   try {
     localStorage.setItem(VERSION_STORAGE_KEY, String(ver))
+  } catch {
+    // localStorage unavailable — non-critical, skip persisting.
+  }
+}
+
+// Remembers the last day number a "Convert JSON" completed for, so the
+// form can prefill the next day (last + 1) on load instead of making the
+// user recall and type it themselves each time.
+export function loadLastDayNumber() {
+  try {
+    const raw = localStorage.getItem(LAST_DAY_STORAGE_KEY)
+    const num = Number(raw)
+    return Number.isFinite(num) && num > 0 ? num : null
+  } catch {
+    return null
+  }
+}
+
+export function saveLastDayNumber(day) {
+  try {
+    localStorage.setItem(LAST_DAY_STORAGE_KEY, String(day))
   } catch {
     // localStorage unavailable — non-critical, skip persisting.
   }

@@ -4,8 +4,10 @@ import { buildNextRoot, buildNextVerFile, isoToDMY, monthKeyFromDMY } from '../u
 import {
   BYTES_ORDER,
   buildDayBytesJson,
+  loadLastDayNumber,
   loadStoredVersion,
   mergeBytesMonthJson,
+  saveLastDayNumber,
   saveStoredVersion,
 } from '../utils/dailyBytesJson'
 import { bytesToBase64, createZip } from '../utils/zip'
@@ -30,6 +32,14 @@ const TOPICS_KEY_BY_CONTENT_TYPE = {
 
 function todayISO() {
   return new Date().toISOString().split('T')[0]
+}
+
+// Prefills the Day field with the day after the last one a "Convert JSON"
+// completed for, so returning the next day doesn't require remembering and
+// re-typing the next number by hand.
+function nextDayDefault() {
+  const lastDay = loadLastDayNumber()
+  return lastDay ? String(lastDay + 1) : ''
 }
 
 function cacheKey(contentType, day) {
@@ -69,7 +79,7 @@ function zipFileFromMonthJson(monthKey, monthJson) {
 
 function DailyBytesParser() {
   const [contentType, setContentType] = useState('spoken')
-  const [day, setDay] = useState('')
+  const [day, setDay] = useState(nextDayDefault)
   const [date, setDate] = useState(todayISO)
   const [topic, setTopic] = useState('')
 
@@ -364,6 +374,9 @@ function DailyBytesParser() {
         // localStorage unavailable/full — the previews below still show the result.
       }
       saveStoredVersion(finalVer)
+
+      const dayNum = Number(day)
+      if (Number.isFinite(dayNum) && dayNum > 0) saveLastDayNumber(dayNum)
 
       setDayJson(finalDayJson)
       setMonthJson(mergedMonthJson)
