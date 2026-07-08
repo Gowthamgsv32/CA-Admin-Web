@@ -9,6 +9,7 @@ import {
   saveStoredVersion,
 } from '../utils/dailyBytesJson'
 import { bytesToBase64, createZip } from '../utils/zip'
+import { downloadBlob } from '../utils/download'
 
 const CONTENT_TYPES = [
   { value: 'spoken', label: 'Spoken' },
@@ -64,20 +65,6 @@ function zipFileFromMonthJson(monthKey, monthJson) {
   return createZip([
     { name: `${monthKey}.json`, data: new TextEncoder().encode(JSON.stringify(monthJson)) },
   ])
-}
-
-function downloadBlob(data, filename, mimeType) {
-  const blob = new Blob([data], { type: mimeType })
-  const url = URL.createObjectURL(blob)
-
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-
-  URL.revokeObjectURL(url)
 }
 
 function DailyBytesParser() {

@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CURRENT_AFFAIRS_BASE } from '../config/api'
+import { CURRENT_AFFAIRS_BASE, WORKER_URL } from '../config/api'
+import { isoToDMY } from '../utils/dailyBytesPublish'
+import { buildTopicsJson, loadStoredRecallVersion, saveStoredRecallVersion } from '../utils/recallGameJson'
+import { downloadBlob } from '../utils/download'
 import MultiSelectDropdown from '../components/MultiSelectDropdown'
 
 const MONTHS = [
@@ -34,6 +37,10 @@ function todayParts() {
   }
 }
 
+function todayISO() {
+  return new Date().toISOString().split('T')[0]
+}
+
 function groupByCategory(cas) {
   const map = new Map()
   for (const item of cas) {
@@ -56,7 +63,14 @@ function RecallGameParser() {
   const [error, setError] = useState('')
 
   const [selectedCategory, setSelectedCategory] = useState('')
-  const [selectedItems, setSelectedItems] = useState({})
+  const [selectedItems, setSelectedItems] = useState([]) // ordered array, oldest selection first
+
+  const [gameDate, setGameDate] = useState(todayISO)
+  const [generating, setGenerating] = useState(false)
+  const [generateProgress, setGenerateProgress] = useState('')
+  const [generateError, setGenerateError] = useState('')
+  const [topicsJson, setTopicsJson] = useState(null)
+  const [topicsExpanded, setTopicsExpanded] = useState(true)
 
   const url = `${CURRENT_AFFAIRS_BASE}/${month}-${year}.json`
 
@@ -101,37 +115,88 @@ function RecallGameParser() {
   )
 
   const categorySelectedValues = useMemo(
-    () => currentCategoryItems.filter((item) => selectedItems[item.id]).map((item) => item.id),
+    () => currentCategoryItems.filter((item) => selectedItems.some((si) => si.id === item.id)).map((item) => item.id),
     [currentCategoryItems, selectedItems]
   )
 
+  // Selections are kept in an ordered array (not keyed by id) because
+  // article ids look like plain integers, and JS objects silently reorder
+  // integer-like keys — which would scramble the batch order used below.
   function handleCategorySelectionChange(newIds) {
     setSelectedItems((prev) => {
-      const next = { ...prev }
-      for (const item of currentCategoryItems) {
-        delete next[item.id]
-      }
+      const withoutCategory = prev.filter((si) => !currentCategoryItems.some((item) => item.id === si.id))
       const newIdSet = new Set(newIds)
-      for (const item of currentCategoryItems) {
-        if (newIdSet.has(item.id)) next[item.id] = item
-      }
-      return next
+      const nowSelected = currentCategoryItems.filter((item) => newIdSet.has(item.id))
+      return [...withoutCategory, ...nowSelected]
     })
   }
 
   function removeSelectedItem(id) {
-    setSelectedItems((prev) => {
-      const next = { ...prev }
-      delete next[id]
-      return next
-    })
+    setSelectedItems((prev) => prev.filter((item) => item.id !== id))
   }
 
   function clearAllSelected() {
-    setSelectedItems({})
+    setSelectedItems([])
   }
 
-  const selectedList = Object.values(selectedItems)
+  const selectedList = selectedItems
+
+  async function handleGenerateTopics() {
+    setGenerateError('')
+    setTopicsJson(null)
+    setTopicsExpanded(true)
+
+    if (selectedList.length === 0) {
+      setGenerateError('Select at least one article first.')
+      return
+    }
+    if (!gameDate) {
+      setGenerateError('Please choose a date for this recall game.')
+      return
+    }
+
+    setGenerating(true)
+    try {
+      const generatedList = []
+      for (let i = 0; i < selectedList.length; i++) {
+        const article = selectedList[i]
+        setGenerateProgress(`Generating ${i + 1} of ${selectedList.length}…`)
+
+        const res = await fetch(`${WORKER_URL}/generate-recall`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            article: {
+              title_en: article.title_en,
+              desc_en: article.desc_en,
+              category: article.category,
+              date: article.date,
+            },
+          }),
+        })
+
+        const result = await res.json()
+        if (result.error) throw new Error(`"${article.title_en}": ${result.error}`)
+        generatedList.push(result.data)
+      }
+
+      const dateDMY = isoToDMY(gameDate)
+      const ver = loadStoredRecallVersion() + 1000
+      const combined = buildTopicsJson({ dateDMY, ver, generatedList })
+      saveStoredRecallVersion(ver)
+      setTopicsJson(combined)
+    } catch (err) {
+      setGenerateError(err.message)
+    } finally {
+      setGenerating(false)
+      setGenerateProgress('')
+    }
+  }
+
+  function handleDownloadTopicsJson() {
+    if (!topicsJson) return
+    downloadBlob(JSON.stringify(topicsJson, null, 2), `${isoToDMY(gameDate)}-recall.json`, 'application/json')
+  }
 
   return (
     <div className="page">
@@ -216,6 +281,32 @@ function RecallGameParser() {
               </label>
             )}
           </section>
+
+          <section className="form-card">
+            <h3>Generate Recall Game</h3>
+            <p className="field-hint">
+              Generates one recall card per selected article — {selectedList.length || 'no'} article
+              {selectedList.length === 1 ? '' : 's'} selected.
+            </p>
+
+            <label className="field">
+              <span>Date</span>
+              <input type="date" value={gameDate} onChange={(e) => setGameDate(e.target.value)} />
+            </label>
+
+            {generateError && <div className="alert alert-error">{generateError}</div>}
+
+            <div className="form-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleGenerateTopics}
+                disabled={generating || selectedList.length === 0}
+              >
+                {generating ? generateProgress || 'Generating…' : 'Generate Recall Game JSON'}
+              </button>
+            </div>
+          </section>
         </div>
 
         <div className="page-col page-col-right">
@@ -254,6 +345,28 @@ function RecallGameParser() {
               </div>
             )}
           </section>
+
+          {topicsJson && (
+            <section className="result-card">
+              <div className="result-toolbar">
+                <h3>Recall Game JSON ({topicsJson.topics.length})</h3>
+                <div className="result-actions">
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => setTopicsExpanded((v) => !v)}
+                    aria-expanded={topicsExpanded}
+                  >
+                    {topicsExpanded ? 'Collapse' : 'Expand'}
+                  </button>
+                  <button type="button" className="btn btn-ghost" onClick={handleDownloadTopicsJson}>
+                    Download JSON
+                  </button>
+                </div>
+              </div>
+              {topicsExpanded && <pre className="json-preview">{JSON.stringify(topicsJson, null, 2)}</pre>}
+            </section>
+          )}
         </div>
       </div>
     </div>

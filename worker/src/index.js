@@ -1,6 +1,7 @@
 import { PROMPTS } from './prompts.js'
 import { buildResultHtml, buildGrammarHtml, buildPhraseHtml, buildWordHtml } from './html.js'
 import { putObjectToSpaces } from './spaces.js'
+import { buildRecallGamePrompt } from './recallGamePrompts.js'
 
 const HTML_BUILDERS = {
   spoken: buildResultHtml,
@@ -141,6 +142,51 @@ async function handleGenerate(request, env) {
   return json(env, { html, json: data })
 }
 
+// Recall Game Parser: turns one selected Current Affairs article into short
+// recall content. Unlike handleGenerate, the result is returned as raw JSON
+// (question/hint/exp) — the frontend assembles the final {id, ver, date,
+// is_lg, con} shape itself, once per selected article.
+async function handleGenerateRecall(request, env) {
+  const { article } = await request.json()
+
+  if (!article?.title_en) {
+    return json(env, { error: 'Missing article data.' }, 400)
+  }
+
+  const apiKeys = parseApiKeys(env.GEMINI_API_KEY)
+  if (apiKeys.length === 0) {
+    return json(env, { error: 'No Gemini API key configured.' }, 500)
+  }
+
+  let geminiRes
+  try {
+    geminiRes = await callGeminiWithFallback(buildRecallGamePrompt(article), apiKeys)
+  } catch (err) {
+    return json(env, { error: `Gemini request failed on every API key: ${err.message}` }, 503)
+  }
+
+  const geminiBody = await geminiRes.json()
+  if (geminiBody.error) {
+    return json(env, { error: geminiBody.error.message }, 502)
+  }
+
+  const finishReason = geminiBody.candidates?.[0]?.finishReason
+  let rawText = geminiBody.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+  rawText = rawText.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim()
+
+  let data
+  try {
+    data = JSON.parse(rawText)
+  } catch {
+    if (finishReason === 'MAX_TOKENS') {
+      return json(env, { error: 'Gemini response was cut off (ran out of output tokens) before finishing the JSON. Try again.' }, 502)
+    }
+    return json(env, { error: `Failed to parse AI response: ${rawText}` }, 502)
+  }
+
+  return json(env, { data })
+}
+
 async function handleUpload(request, env) {
   const { date, json: jsonPayload } = await request.json()
 
@@ -209,6 +255,9 @@ export default {
     try {
       if (request.method === 'POST' && url.pathname === '/generate') {
         return await handleGenerate(request, env)
+      }
+      if (request.method === 'POST' && url.pathname === '/generate-recall') {
+        return await handleGenerateRecall(request, env)
       }
       if (request.method === 'POST' && url.pathname === '/upload') {
         return await handleUpload(request, env)
