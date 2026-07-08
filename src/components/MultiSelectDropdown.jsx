@@ -57,13 +57,17 @@ function MultiSelectDropdown({ options, selectedValues, onChange, placeholder = 
           </div>
           <div className="multiselect-list">
             {options.map((opt) => (
-              <label key={opt.value} className="multiselect-option">
+              <label
+                key={opt.value}
+                className={`multiselect-option${opt.used ? ' multiselect-option--used' : ''}`}
+              >
                 <input
                   type="checkbox"
                   checked={selectedSet.has(opt.value)}
                   onChange={() => toggleValue(opt.value)}
                 />
                 <span>{opt.label}</span>
+                {opt.used && <span className="multiselect-used-badge">✓ Published</span>}
               </label>
             ))}
             {options.length === 0 && <div className="multiselect-empty">No items</div>}

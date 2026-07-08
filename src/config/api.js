@@ -14,3 +14,5 @@ export const CURRENT_AFFAIRS_BASE = 'https://healthappobjects.ams3.cdn.digitaloc
 export const RECALL_GAME_BASE = 'https://healthappobjects.ams3.cdn.digitaloceanspaces.com/Recall-Game'
 
 export const RECALL_GAME_ROOT_URL = `${RECALL_GAME_BASE}/recall-root.json`
+
+export const RECALL_GAME_USED_ARTICLES_URL = `${RECALL_GAME_BASE}/used-articles.json`

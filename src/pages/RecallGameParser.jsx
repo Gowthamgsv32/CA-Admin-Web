@@ -1,8 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CURRENT_AFFAIRS_BASE, RECALL_GAME_BASE, RECALL_GAME_ROOT_URL, WORKER_URL } from '../config/api'
+import {
+  CURRENT_AFFAIRS_BASE,
+  RECALL_GAME_BASE,
+  RECALL_GAME_ROOT_URL,
+  RECALL_GAME_USED_ARTICLES_URL,
+  WORKER_URL,
+} from '../config/api'
 import { isoToDMY, monthKeyFromDMY } from '../utils/dailyBytesPublish'
 import { buildTopicsJson, loadStoredRecallVersion, saveStoredRecallVersion } from '../utils/recallGameJson'
 import { buildNextRecallRoot, mergeTopicsMonthJson } from '../utils/recallGamePublish'
+import { mergeUsedArticleIds } from '../utils/recallGameUsage'
 import { bytesToBase64, createZip } from '../utils/zip'
 import { downloadBlob } from '../utils/download'
 import MultiSelectDropdown from '../components/MultiSelectDropdown'
@@ -84,6 +91,7 @@ function RecallGameParser() {
   const [zipBytesRecall, setZipBytesRecall] = useState(null)
 
   const [currentRecallRoot, setCurrentRecallRoot] = useState(null)
+  const [usedArticlesJson, setUsedArticlesJson] = useState(null)
   const [loadingRecallRoot, setLoadingRecallRoot] = useState(true)
   const [recallRootError, setRecallRootError] = useState('')
 
@@ -125,13 +133,25 @@ function RecallGameParser() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [month, year])
 
-  async function loadRecallRootState() {
+  async function loadRecallServerState() {
     setLoadingRecallRoot(true)
     setRecallRootError('')
     try {
-      const res = await fetch(RECALL_GAME_ROOT_URL, { cache: 'no-store' })
-      if (!res.ok) throw new Error(`Failed to load recall-root.json (${res.status})`)
-      setCurrentRecallRoot(await res.json())
+      const [rootRes, usedRes] = await Promise.all([
+        fetch(RECALL_GAME_ROOT_URL, { cache: 'no-store' }),
+        fetch(RECALL_GAME_USED_ARTICLES_URL, { cache: 'no-store' }),
+      ])
+
+      if (!rootRes.ok) throw new Error(`Failed to load recall-root.json (${rootRes.status})`)
+      setCurrentRecallRoot(await rootRes.json())
+
+      if (usedRes.ok) {
+        setUsedArticlesJson(await usedRes.json())
+      } else if (usedRes.status === 404) {
+        setUsedArticlesJson({ ids: [] })
+      } else {
+        throw new Error(`Failed to load used-articles.json (${usedRes.status})`)
+      }
     } catch (err) {
       setRecallRootError(err.message)
     } finally {
@@ -140,8 +160,10 @@ function RecallGameParser() {
   }
 
   useEffect(() => {
-    loadRecallRootState()
+    loadRecallServerState()
   }, [])
+
+  const usedArticleIds = useMemo(() => new Set(usedArticlesJson?.ids || []), [usedArticlesJson])
 
   const categories = useMemo(() => (casData?.cas ? groupByCategory(casData.cas) : []), [casData])
 
@@ -290,15 +312,17 @@ function RecallGameParser() {
     downloadBlob(zipBytesRecall, `${monthKeyFromDMY(gameDateDMY)}.zip`, 'application/zip')
   }
 
-  const publishReady = Boolean(nextRootResult && topicsJson && monthJsonRecall && zipBytesRecall)
+  const publishReady = Boolean(nextRootResult && topicsJson && monthJsonRecall && zipBytesRecall && usedArticlesJson)
 
   function handleDownloadAllRecallFiles() {
     if (!publishReady) return
     const monthKey = monthKeyFromDMY(gameDateDMY)
+    const nextUsedArticlesJson = mergeUsedArticleIds(usedArticlesJson, selectedList.map((item) => item.id))
     downloadBlob(JSON.stringify(nextRootResult.root, null, 2), 'recall-root.json', 'application/json')
     downloadBlob(JSON.stringify(topicsJson, null, 2), `${gameDateDMY}.json`, 'application/json')
     downloadBlob(JSON.stringify(monthJsonRecall, null, 2), `${monthKey}.json`, 'application/json')
     downloadBlob(zipBytesRecall, `${monthKey}.zip`, 'application/zip')
+    downloadBlob(JSON.stringify(nextUsedArticlesJson, null, 2), 'used-articles.json', 'application/json')
   }
 
   async function handlePublishAllRecall() {
@@ -308,7 +332,7 @@ function RecallGameParser() {
       setPublishStatus({ type: 'error', message: 'Please choose a date.' })
       return
     }
-    if (!nextRootResult) {
+    if (!nextRootResult || !usedArticlesJson) {
       setPublishStatus({ type: 'error', message: 'Root file not ready — check Server State.' })
       return
     }
@@ -320,6 +344,7 @@ function RecallGameParser() {
     setPublishing(true)
     try {
       const monthKey = monthKeyFromDMY(gameDateDMY)
+      const nextUsedArticlesJson = mergeUsedArticleIds(usedArticlesJson, selectedList.map((item) => item.id))
       const files = [
         { key: 'Recall-Game/recall-root.json', body: JSON.stringify(nextRootResult.root) },
         { key: `Recall-Game/${gameDateDMY}.json`, body: JSON.stringify(topicsJson) },
@@ -329,6 +354,7 @@ function RecallGameParser() {
           bodyBase64: bytesToBase64(zipBytesRecall),
           contentType: 'application/zip',
         },
+        { key: 'Recall-Game/used-articles.json', body: JSON.stringify(nextUsedArticlesJson) },
       ]
 
       const res = await fetch(`${WORKER_URL}/publish`, {
@@ -346,8 +372,8 @@ function RecallGameParser() {
           message: `Failed to upload: ${failed.map((f) => `${f.key} (${f.error})`).join('; ')}`,
         })
       } else {
-        setPublishStatus({ type: 'success', message: `Published all 4 files for ${gameDateDMY}.` })
-        await loadRecallRootState()
+        setPublishStatus({ type: 'success', message: `Published all 5 files for ${gameDateDMY}.` })
+        await loadRecallServerState()
       }
     } catch (err) {
       setPublishStatus({ type: 'error', message: `Publish error: ${err.message}` })
@@ -419,11 +445,14 @@ function RecallGameParser() {
                 disabled={categories.length === 0}
               >
                 <option value="">Select a category…</option>
-                {categories.map((c) => (
-                  <option key={c.category} value={c.category}>
-                    {c.category} ({c.items.length})
-                  </option>
-                ))}
+                {categories.map((c) => {
+                  const usedCount = c.items.filter((item) => usedArticleIds.has(item.id)).length
+                  return (
+                    <option key={c.category} value={c.category}>
+                      {c.category} ({c.items.length}{usedCount > 0 ? `, ${usedCount} already published` : ''})
+                    </option>
+                  )
+                })}
               </select>
             </label>
 
@@ -431,11 +460,16 @@ function RecallGameParser() {
               <label className="field">
                 <span>Articles</span>
                 <MultiSelectDropdown
-                  options={currentCategoryItems.map((item) => ({ value: item.id, label: item.title_en }))}
+                  options={currentCategoryItems.map((item) => ({
+                    value: item.id,
+                    label: item.title_en,
+                    used: usedArticleIds.has(item.id),
+                  }))}
                   selectedValues={categorySelectedValues}
                   onChange={handleCategorySelectionChange}
                   placeholder="Select articles…"
                 />
+                <span className="field-hint">✓ Published = already turned into a recall game and uploaded.</span>
               </label>
             )}
           </section>
@@ -468,7 +502,7 @@ function RecallGameParser() {
 
           <section className="form-card">
             <h3>Publish to Server</h3>
-            <p className="field-hint">All 4 files must be ready before uploading with public access.</p>
+            <p className="field-hint">All 5 files must be ready before uploading with public access.</p>
 
             <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, color: 'var(--text-muted)' }}>
               <li>{nextRootResult ? '✅' : '⬜'} Root file (recall-root.json)</li>
@@ -478,6 +512,7 @@ function RecallGameParser() {
                 {zipBytesRecall ? '✅' : '⬜'} Month ZIP (
                 {gameDateDMY ? `${monthKeyFromDMY(gameDateDMY)}.zip` : 'no date selected'})
               </li>
+              <li>{usedArticlesJson ? '✅' : '⬜'} Used-articles registry (used-articles.json)</li>
             </ul>
 
             {publishStatus && (
@@ -493,7 +528,7 @@ function RecallGameParser() {
                 onClick={handleDownloadAllRecallFiles}
                 disabled={!publishReady}
               >
-                Download All 4 Files
+                Download All 5 Files
               </button>
               <button
                 type="button"
@@ -526,11 +561,14 @@ function RecallGameParser() {
                       ` → ${nextRootResult.root.av_mos[nextRootResult.monthEntryIndex].desc} (v${nextRootResult.root.av_mos[nextRootResult.monthEntryIndex].ver})`}
                   </p>
                 )}
+                {usedArticlesJson && (
+                  <p className="field-hint">{usedArticlesJson.ids.length} source articles converted so far (all time).</p>
+                )}
               </>
             )}
 
             <div className="form-actions">
-              <button type="button" className="btn btn-ghost" onClick={loadRecallRootState} disabled={loadingRecallRoot}>
+              <button type="button" className="btn btn-ghost" onClick={loadRecallServerState} disabled={loadingRecallRoot}>
                 Refresh
               </button>
             </div>
@@ -560,6 +598,7 @@ function RecallGameParser() {
                   <span key={item.id} className="chip">
                     <span className="chip-category">{item.category || 'Uncategorized'}</span>
                     <span>{item.title_en}</span>
+                    {usedArticleIds.has(item.id) && <span className="multiselect-used-badge">✓ Published</span>}
                     <button
                       type="button"
                       className="chip-remove"
