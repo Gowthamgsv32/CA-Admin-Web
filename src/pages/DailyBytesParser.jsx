@@ -506,239 +506,245 @@ function DailyBytesParser() {
         <p>Generate a daily content card with Gemini, preview it, then download or publish the JSON.</p>
       </section>
 
-      <section className="form-card">
-        <div className="form-grid">
-          <label className="field">
-            <span>Day</span>
-            <input
-              type="number"
-              value={day}
-              onChange={(e) => setDay(e.target.value)}
-              placeholder="e.g. 12"
-            />
-          </label>
+      <div className="page-columns">
+        <div className="page-col page-col-left">
+          <section className="form-card">
+            <div className="form-grid">
+              <label className="field">
+                <span>Day</span>
+                <input
+                  type="number"
+                  value={day}
+                  onChange={(e) => setDay(e.target.value)}
+                  placeholder="e.g. 12"
+                />
+              </label>
 
-          <label className="field">
-            <span>Date</span>
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          </label>
-        </div>
+              <label className="field">
+                <span>Date</span>
+                <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+              </label>
+            </div>
 
-        <div className="field">
-          <span>Content type</span>
-          <div className="button-row">
-            {CONTENT_TYPES.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                className={`btn ${contentType === opt.value ? 'btn-primary' : 'btn-ghost'}`}
-                aria-pressed={contentType === opt.value}
-                onClick={() => setContentType(opt.value)}
-              >
-                {opt.label}
+            <div className="field">
+              <span>Content type</span>
+              <div className="button-row">
+                {CONTENT_TYPES.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    className={`btn ${contentType === opt.value ? 'btn-primary' : 'btn-ghost'}`}
+                    aria-pressed={contentType === opt.value}
+                    onClick={() => setContentType(opt.value)}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <label className="field">
+              <span>Topic</span>
+              <textarea
+                rows={4}
+                value={topic}
+                onChange={(e) => setTopic(e.target.value)}
+                placeholder="What should today's tip be about?"
+              />
+              {matchedPhase && <span className="field-hint">Prefilled from Day {day} · {matchedPhase}</span>}
+            </label>
+
+            {error && <div className="alert alert-error">{error}</div>}
+            {convertError && <div className="alert alert-error">{convertError}</div>}
+
+            <div className="form-actions">
+              <button type="button" className="btn btn-ghost" onClick={handleConvert} disabled={converting}>
+                {converting ? 'Converting…' : 'Convert JSON'}
               </button>
-            ))}
-          </div>
-        </div>
-
-        <label className="field">
-          <span>Topic</span>
-          <textarea
-            rows={4}
-            value={topic}
-            onChange={(e) => setTopic(e.target.value)}
-            placeholder="What should today's tip be about?"
-          />
-          {matchedPhase && <span className="field-hint">Prefilled from Day {day} · {matchedPhase}</span>}
-        </label>
-
-        {error && <div className="alert alert-error">{error}</div>}
-        {convertError && <div className="alert alert-error">{convertError}</div>}
-
-        <div className="form-actions">
-          <button type="button" className="btn btn-ghost" onClick={handleConvert} disabled={converting}>
-            {converting ? 'Converting…' : 'Convert JSON'}
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={handleGenerate}
-            disabled={loading}
-          >
-            {loading ? 'Thinking…' : 'Ask Gemini'}
-          </button>
-        </div>
-      </section>
-
-      {dayJson && (
-        <section className="result-card">
-          <div className="result-toolbar">
-            <h3>Combined Day JSON</h3>
-            <div className="result-actions">
               <button
                 type="button"
-                className="btn btn-ghost"
-                onClick={() => setDayJsonExpanded((v) => !v)}
-                aria-expanded={dayJsonExpanded}
+                className="btn btn-primary"
+                onClick={handleGenerate}
+                disabled={loading}
               >
-                {dayJsonExpanded ? 'Collapse' : 'Expand'}
-              </button>
-              <button type="button" className="btn btn-ghost" onClick={handleDownloadDayJson}>
-                Download JSON
+                {loading ? 'Thinking…' : 'Ask Gemini'}
               </button>
             </div>
-          </div>
-          {dayJsonExpanded && <pre className="json-preview">{JSON.stringify(dayJson, null, 2)}</pre>}
-        </section>
-      )}
+          </section>
 
-      {monthJson && (
-        <section className="result-card">
-          <div className="result-toolbar">
-            <h3>Month JSON — {monthKey}</h3>
-            <div className="result-actions">
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={() => setMonthJsonExpanded((v) => !v)}
-                aria-expanded={monthJsonExpanded}
-              >
-                {monthJsonExpanded ? 'Collapse' : 'Expand'}
-              </button>
-              <button type="button" className="btn btn-ghost" onClick={handleDownloadMonthJson}>
-                Download JSON
-              </button>
-              <button type="button" className="btn btn-ghost" onClick={handleDownloadZip} disabled={!zipBytes}>
-                Download ZIP
-              </button>
-            </div>
-          </div>
-          <p className="field-hint" style={{ padding: '0 20px 12px' }}>
-            {monthJson.bytes.length} total bytes for {monthKey}.
-          </p>
-          {monthJsonExpanded && <pre className="json-preview">{JSON.stringify(monthJson, null, 2)}</pre>}
-        </section>
-      )}
+          <section className="form-card">
+            <h3>Publish to Server</h3>
+            <p className="field-hint">All 5 files must be ready before uploading with public access.</p>
 
-      <section className="form-card">
-        <h3>Publish to Server</h3>
-        <p className="field-hint">All 5 files must be ready before uploading with public access.</p>
+            <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, color: 'var(--text-muted)' }}>
+              <li>{nextVerFile ? '✅' : '⬜'} Version file (daily-bytes-ver.json)</li>
+              <li>{nextRootResult ? '✅' : '⬜'} Root file (daily-bytes-root.json)</li>
+              <li>{dayJson ? '✅' : '⬜'} Day JSON ({selectedDateDMY || 'no date selected'})</li>
+              <li>{monthJson ? '✅' : '⬜'} Month JSON ({monthKey || 'no date selected'})</li>
+              <li>{zipBytes ? '✅' : '⬜'} Month ZIP ({monthKey ? `${monthKey}.zip` : 'no date selected'})</li>
+            </ul>
 
-        <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, color: 'var(--text-muted)' }}>
-          <li>{nextVerFile ? '✅' : '⬜'} Version file (daily-bytes-ver.json)</li>
-          <li>{nextRootResult ? '✅' : '⬜'} Root file (daily-bytes-root.json)</li>
-          <li>{dayJson ? '✅' : '⬜'} Day JSON ({selectedDateDMY || 'no date selected'})</li>
-          <li>{monthJson ? '✅' : '⬜'} Month JSON ({monthKey || 'no date selected'})</li>
-          <li>{zipBytes ? '✅' : '⬜'} Month ZIP ({monthKey ? `${monthKey}.zip` : 'no date selected'})</li>
-        </ul>
-
-        {publishStatus && (
-          <div className={`alert ${publishStatus.type === 'success' ? 'alert-success' : 'alert-error'}`}>
-            {publishStatus.message}
-          </div>
-        )}
-
-        <div className="form-actions">
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={handleDownloadAllFiles}
-            disabled={!publishReady}
-          >
-            Download All 5 Files
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={handlePublishAll}
-            disabled={!publishReady || publishing}
-          >
-            {publishing ? 'Uploading…' : 'Upload JSON'}
-          </button>
-        </div>
-      </section>
-
-      <section className="form-card">
-        <h3>Server State</h3>
-
-        {loadingServerState && <p className="field-hint">Loading root.json and daily-bytes-ver.json…</p>}
-        {serverStateError && <div className="alert alert-error">{serverStateError}</div>}
-
-        {!loadingServerState && currentVerFile && currentRoot && (
-          <>
-            <p className="field-hint">
-              Version file: v{currentVerFile.ver} ({currentVerFile.date})
-              {nextVerFile && ` → v${nextVerFile.ver} (${nextVerFile.date})`}
-            </p>
-            <p className="field-hint">
-              Root: v{currentRoot.ver}, last updated {currentRoot.date}
-              {nextRootResult && ` → v${nextRootResult.root.ver}, ${nextRootResult.root.date}`}
-            </p>
-            {currentRoot.av_mos?.[0] && (
-              <p className="field-hint">
-                Latest month "{currentRoot.av_mos[0].title}": {currentRoot.av_mos[0].desc} (v
-                {currentRoot.av_mos[0].ver})
-                {nextRootResult &&
-                  ` → ${nextRootResult.root.av_mos[nextRootResult.monthEntryIndex].desc} (v${nextRootResult.root.av_mos[nextRootResult.monthEntryIndex].ver})`}
-              </p>
+            {publishStatus && (
+              <div className={`alert ${publishStatus.type === 'success' ? 'alert-success' : 'alert-error'}`}>
+                {publishStatus.message}
+              </div>
             )}
-          </>
-        )}
 
-        <div className="form-actions">
-          <button type="button" className="btn btn-ghost" onClick={loadServerState} disabled={loadingServerState}>
-            Refresh
-          </button>
+            <div className="form-actions">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={handleDownloadAllFiles}
+                disabled={!publishReady}
+              >
+                Download All 5 Files
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handlePublishAll}
+                disabled={!publishReady || publishing}
+              >
+                {publishing ? 'Uploading…' : 'Upload JSON'}
+              </button>
+            </div>
+          </section>
+
+          <section className="form-card">
+            <h3>Server State</h3>
+
+            {loadingServerState && <p className="field-hint">Loading root.json and daily-bytes-ver.json…</p>}
+            {serverStateError && <div className="alert alert-error">{serverStateError}</div>}
+
+            {!loadingServerState && currentVerFile && currentRoot && (
+              <>
+                <p className="field-hint">
+                  Version file: v{currentVerFile.ver} ({currentVerFile.date})
+                  {nextVerFile && ` → v${nextVerFile.ver} (${nextVerFile.date})`}
+                </p>
+                <p className="field-hint">
+                  Root: v{currentRoot.ver}, last updated {currentRoot.date}
+                  {nextRootResult && ` → v${nextRootResult.root.ver}, ${nextRootResult.root.date}`}
+                </p>
+                {currentRoot.av_mos?.[0] && (
+                  <p className="field-hint">
+                    Latest month "{currentRoot.av_mos[0].title}": {currentRoot.av_mos[0].desc} (v
+                    {currentRoot.av_mos[0].ver})
+                    {nextRootResult &&
+                      ` → ${nextRootResult.root.av_mos[nextRootResult.monthEntryIndex].desc} (v${nextRootResult.root.av_mos[nextRootResult.monthEntryIndex].ver})`}
+                  </p>
+                )}
+              </>
+            )}
+
+            <div className="form-actions">
+              <button type="button" className="btn btn-ghost" onClick={loadServerState} disabled={loadingServerState}>
+                Refresh
+              </button>
+            </div>
+          </section>
         </div>
-      </section>
 
-      {(loading || resultHtml) && (
-        <section className="result-card">
-          <div className="result-toolbar">
-            <h3>Preview{fromCache && !loading && <span className="field-hint"> · loaded from local cache</span>}</h3>
-            <div className="result-actions">
-              {!loading && (
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={() => setHtmlPreviewExpanded((v) => !v)}
-                  aria-expanded={htmlPreviewExpanded}
-                >
-                  {htmlPreviewExpanded ? 'Collapse' : 'Expand'}
-                </button>
+        <div className="page-col page-col-right">
+          {(loading || resultHtml) && (
+            <section className="result-card">
+              <div className="result-toolbar">
+                <h3>Preview{fromCache && !loading && <span className="field-hint"> · loaded from local cache</span>}</h3>
+                <div className="result-actions">
+                  {!loading && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={() => setHtmlPreviewExpanded((v) => !v)}
+                      aria-expanded={htmlPreviewExpanded}
+                    >
+                      {htmlPreviewExpanded ? 'Collapse' : 'Expand'}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={handleDownload}
+                    disabled={!resultJson}
+                  >
+                    Download JSON
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={handleUpload}
+                    disabled={!resultJson}
+                  >
+                    Upload Category JSON
+                  </button>
+                </div>
+              </div>
+
+              {uploadStatus && (
+                <div className={`alert ${uploadStatus.type === 'success' ? 'alert-success' : 'alert-error'}`}>
+                  {uploadStatus.message}
+                </div>
               )}
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={handleDownload}
-                disabled={!resultJson}
-              >
-                Download JSON
-              </button>
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={handleUpload}
-                disabled={!resultJson}
-              >
-                Upload Category JSON
-              </button>
-            </div>
-          </div>
 
-          {uploadStatus && (
-            <div className={`alert ${uploadStatus.type === 'success' ? 'alert-success' : 'alert-error'}`}>
-              {uploadStatus.message}
-            </div>
+              {loading ? (
+                <div className="result-loading">Thinking…</div>
+              ) : (
+                htmlPreviewExpanded && <iframe ref={iframeRef} className="result-frame" title="Generated preview" />
+              )}
+            </section>
           )}
 
-          {loading ? (
-            <div className="result-loading">Thinking…</div>
-          ) : (
-            htmlPreviewExpanded && <iframe ref={iframeRef} className="result-frame" title="Generated preview" />
+          {dayJson && (
+            <section className="result-card">
+              <div className="result-toolbar">
+                <h3>Combined Day JSON</h3>
+                <div className="result-actions">
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => setDayJsonExpanded((v) => !v)}
+                    aria-expanded={dayJsonExpanded}
+                  >
+                    {dayJsonExpanded ? 'Collapse' : 'Expand'}
+                  </button>
+                  <button type="button" className="btn btn-ghost" onClick={handleDownloadDayJson}>
+                    Download JSON
+                  </button>
+                </div>
+              </div>
+              {dayJsonExpanded && <pre className="json-preview">{JSON.stringify(dayJson, null, 2)}</pre>}
+            </section>
           )}
-        </section>
-      )}
+
+          {monthJson && (
+            <section className="result-card">
+              <div className="result-toolbar">
+                <h3>Month JSON — {monthKey}</h3>
+                <div className="result-actions">
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => setMonthJsonExpanded((v) => !v)}
+                    aria-expanded={monthJsonExpanded}
+                  >
+                    {monthJsonExpanded ? 'Collapse' : 'Expand'}
+                  </button>
+                  <button type="button" className="btn btn-ghost" onClick={handleDownloadMonthJson}>
+                    Download JSON
+                  </button>
+                  <button type="button" className="btn btn-ghost" onClick={handleDownloadZip} disabled={!zipBytes}>
+                    Download ZIP
+                  </button>
+                </div>
+              </div>
+              <p className="field-hint" style={{ padding: '0 20px 12px' }}>
+                {monthJson.bytes.length} total bytes for {monthKey}.
+              </p>
+              {monthJsonExpanded && <pre className="json-preview">{JSON.stringify(monthJson, null, 2)}</pre>}
+            </section>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

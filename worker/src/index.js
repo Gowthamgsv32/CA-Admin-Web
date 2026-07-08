@@ -34,40 +34,63 @@ function parseApiKeys(raw) {
     .filter(Boolean)
 }
 
-// Tries each key in order, moving on to the next only when the current one
-// is rate-limited (HTTP 429). Any other response (success or a real error)
-// is returned immediately.
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+// Tries each key in order. A 429 (quota exceeded) moves on to the next key
+// immediately since retrying the same key won't help. A 503 ("the model is
+// currently experiencing high demand") is usually a transient overload on
+// Google's side, so that key gets one quick retry before falling through to
+// the next key. Any other response (success or a real error) is returned
+// immediately.
 async function callGeminiWithFallback(promptText, apiKeys) {
   let lastError = null
 
   for (const apiKey of apiKeys) {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: promptText }] }],
-          generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 2048,
-            thinkingConfig: { thinkingBudget: 0 },
-          },
-        }),
+    const maxAttempts = 2
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: promptText }] }],
+            generationConfig: {
+              temperature: 0.7,
+              maxOutputTokens: 2048,
+              thinkingConfig: { thinkingBudget: 0 },
+            },
+          }),
+        }
+      )
+
+      if (res.status !== 429 && res.status !== 503) {
+        return res
       }
-    )
 
-    if (res.status !== 429) {
-      return res
-    }
+      let detail = ''
+      try {
+        detail = (await res.json())?.error?.message || ''
+      } catch {
+        // ignore — fall back to the generic message below
+      }
+      lastError = new Error(
+        detail ||
+          (res.status === 429
+            ? 'Rate limit exceeded for this Gemini API key.'
+            : 'Gemini model is temporarily overloaded.')
+      )
 
-    let detail = ''
-    try {
-      detail = (await res.json())?.error?.message || ''
-    } catch {
-      // ignore — fall back to the generic message below
+      if (res.status === 503 && attempt < maxAttempts) {
+        await sleep(600)
+        continue
+      }
+
+      break
     }
-    lastError = new Error(detail || 'Rate limit exceeded for this Gemini API key.')
   }
 
   throw lastError || new Error('No Gemini API keys configured.')
@@ -90,7 +113,7 @@ async function handleGenerate(request, env) {
   try {
     geminiRes = await callGeminiWithFallback(promptBuilder(prompt, day), apiKeys)
   } catch (err) {
-    return json(env, { error: `All Gemini API keys are rate-limited: ${err.message}` }, 429)
+    return json(env, { error: `Gemini request failed on every API key: ${err.message}` }, 503)
   }
 
   const geminiBody = await geminiRes.json()
