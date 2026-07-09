@@ -351,7 +351,10 @@ function DailyBytesParser() {
       const monthRes = await fetch(`${DAILY_BYTES_BASE}/${dayMonthKey}.json`, { cache: 'no-store' })
       if (monthRes.ok) {
         currentMonthJson = await monthRes.json()
-      } else if (monthRes.status !== 404) {
+      } else if (monthRes.status !== 404 && monthRes.status !== 403) {
+        // Spaces returns 403 (not 404) for a GET on a key that was never
+        // written, when the bucket doesn't allow public listing — so a
+        // 403 here just means this is a brand-new month.
         throw new Error(`Failed to load ${dayMonthKey}.json (${monthRes.status})`)
       }
 
