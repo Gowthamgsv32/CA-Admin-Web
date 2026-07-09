@@ -7,6 +7,7 @@ const descriptions = {
   '/static-parser': 'Run static analysis parsing on uploaded datasets.',
   '/ca-parser': 'Extract and validate CA-specific document data.',
   '/recall-game-parser': 'Generate and publish recall game content.',
+  '/tnpsc-parser': 'Turn textbook PDFs into TNPSC exam question JSON with Gemini.',
 }
 
 const tools = navItems.filter((item) => item.to !== '/')

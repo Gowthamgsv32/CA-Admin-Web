@@ -36,6 +36,13 @@ const paths = {
       <circle cx="18.5" cy="14" r="1" />
     </>
   ),
+  graduation: (
+    <>
+      <path d="M22 10 12 5 2 10l10 5 10-5Z" />
+      <path d="M6 12v5c0 1.1 2.7 3 6 3s6-1.9 6-3v-5" />
+      <path d="M22 10v6" />
+    </>
+  ),
 }
 
 function Icon({ name, size = 20 }) {

@@ -632,6 +632,120 @@
   background: rgba(0, 0, 0, 0.16);
 }
 
+/* Progress bar */
+.progress-track {
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  transition: width 0.3s ease;
+}
+
+/* Activity log — dark terminal panel, contrasting with the light dashboard */
+.log-panel {
+  margin: 12px 20px 20px;
+  padding: 14px 16px;
+  background: #0f172a;
+  border-radius: 10px;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.log-empty {
+  color: #64748b;
+  padding: 8px 0;
+}
+
+.log-line {
+  color: #cbd5e1;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.log-ts {
+  color: #64748b;
+}
+
+.log-line--success {
+  color: #34d399;
+}
+
+.log-line--warn {
+  color: #fbbf24;
+}
+
+.log-line--error {
+  color: #f87171;
+  font-weight: 600;
+}
+
+.log-line--accent {
+  color: #38bdf8;
+  font-weight: 600;
+}
+
+/* TNPSC batch result rows */
+.batch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.batch-row-info {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.batch-status-dot {
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-top: 5px;
+  background: var(--text-muted);
+}
+
+.batch-status-dot--running {
+  background: var(--accent2);
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
+
+.batch-status-dot--success {
+  background: #1f9d5a;
+}
+
+.batch-status-dot--failed {
+  background: #d64545;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.batch-row-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 /* Responsive */
 @media (max-width: 900px) {
   .sidebar {
