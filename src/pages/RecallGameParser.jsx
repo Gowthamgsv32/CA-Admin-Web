@@ -147,7 +147,10 @@ function RecallGameParser() {
 
       if (usedRes.ok) {
         setUsedArticlesJson(await usedRes.json())
-      } else if (usedRes.status === 404) {
+      } else if (usedRes.status === 404 || usedRes.status === 403) {
+        // Spaces returns 403 (not 404) for a GET on a key that was never
+        // written, when the bucket doesn't allow public listing — so a
+        // 403 here just means the registry hasn't been created yet.
         setUsedArticlesJson({ ids: [] })
       } else {
         throw new Error(`Failed to load used-articles.json (${usedRes.status})`)
@@ -268,7 +271,10 @@ function RecallGameParser() {
       const monthRes = await fetch(`${RECALL_GAME_BASE}/${dayMonthKey}.json`, { cache: 'no-store' })
       if (monthRes.ok) {
         currentMonthJson = await monthRes.json()
-      } else if (monthRes.status !== 404) {
+      } else if (monthRes.status !== 404 && monthRes.status !== 403) {
+        // Spaces returns 403 (not 404) for a GET on a key that was never
+        // written, when the bucket doesn't allow public listing — so a
+        // 403 here just means this is a brand-new month.
         throw new Error(`Failed to load ${dayMonthKey}.json (${monthRes.status})`)
       }
 
