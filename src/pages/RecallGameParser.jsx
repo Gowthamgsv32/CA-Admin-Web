@@ -320,7 +320,6 @@ function RecallGameParser() {
     const nextUsedArticlesJson = mergeUsedArticleIds(usedArticlesJson, selectedList.map((item) => item.id))
     downloadBlob(JSON.stringify(nextRootResult.root, null, 2), 'recall-root.json', 'application/json')
     downloadBlob(JSON.stringify(topicsJson, null, 2), `${gameDateDMY}.json`, 'application/json')
-    downloadBlob(JSON.stringify(monthJsonRecall, null, 2), `${monthKey}.json`, 'application/json')
     downloadBlob(zipBytesRecall, `${monthKey}.zip`, 'application/zip')
     downloadBlob(JSON.stringify(nextUsedArticlesJson, null, 2), 'used-articles.json', 'application/json')
   }
@@ -348,7 +347,6 @@ function RecallGameParser() {
       const files = [
         { key: 'Recall-Game/recall-root.json', body: JSON.stringify(nextRootResult.root) },
         { key: `Recall-Game/${gameDateDMY}.json`, body: JSON.stringify(topicsJson) },
-        { key: `Recall-Game/${monthKey}.json`, body: JSON.stringify(monthJsonRecall) },
         {
           key: `Recall-Game/${monthKey}.zip`,
           bodyBase64: bytesToBase64(zipBytesRecall),
@@ -372,7 +370,7 @@ function RecallGameParser() {
           message: `Failed to upload: ${failed.map((f) => `${f.key} (${f.error})`).join('; ')}`,
         })
       } else {
-        setPublishStatus({ type: 'success', message: `Published all 5 files for ${gameDateDMY}.` })
+        setPublishStatus({ type: 'success', message: `Published all 4 files for ${gameDateDMY}.` })
         await loadRecallServerState()
       }
     } catch (err) {
@@ -502,12 +500,11 @@ function RecallGameParser() {
 
           <section className="form-card">
             <h3>Publish to Server</h3>
-            <p className="field-hint">All 5 files must be ready before uploading with public access.</p>
+            <p className="field-hint">All 4 files must be ready before uploading with public access.</p>
 
             <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, color: 'var(--text-muted)' }}>
               <li>{nextRootResult ? '✅' : '⬜'} Root file (recall-root.json)</li>
               <li>{topicsJson ? '✅' : '⬜'} Day JSON ({gameDateDMY || 'no date selected'})</li>
-              <li>{monthJsonRecall ? '✅' : '⬜'} Month JSON ({gameDateDMY ? monthKeyFromDMY(gameDateDMY) : 'no date selected'})</li>
               <li>
                 {zipBytesRecall ? '✅' : '⬜'} Month ZIP (
                 {gameDateDMY ? `${monthKeyFromDMY(gameDateDMY)}.zip` : 'no date selected'})
@@ -528,7 +525,7 @@ function RecallGameParser() {
                 onClick={handleDownloadAllRecallFiles}
                 disabled={!publishReady}
               >
-                Download All 5 Files
+                Download All 4 Files
               </button>
               <button
                 type="button"
@@ -657,7 +654,8 @@ function RecallGameParser() {
                 </div>
               </div>
               <p className="field-hint" style={{ padding: '0 20px 12px' }}>
-                {monthJsonRecall.topics.length} total questions for {gameDateDMY && monthKeyFromDMY(gameDateDMY)}.
+                {monthJsonRecall.topics.length} total questions for {gameDateDMY && monthKeyFromDMY(gameDateDMY)}. Only the
+                zip is uploaded to the server — this JSON is preview/download only.
               </p>
               {monthJsonExpanded && <pre className="json-preview">{JSON.stringify(monthJsonRecall, null, 2)}</pre>}
             </section>
