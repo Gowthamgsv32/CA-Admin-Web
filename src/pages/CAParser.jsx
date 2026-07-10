@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { DAILY_BYTES_BASE, ROOT_URL, VER_FILE_URL, WORKER_URL } from '../config/api'
+import { CA_SHEET_ID, DAILY_BYTES_BASE, ROOT_URL, VER_FILE_URL, WORKER_URL } from '../config/api'
 import { bytesToBase64, createZip } from '../utils/zip'
+import { downloadBlob } from '../utils/download'
 import {
   buildNextRoot,
   buildNextVerFile,
@@ -8,9 +9,14 @@ import {
   mergeMonthJson,
   monthKeyFromDMY,
 } from '../utils/dailyBytesPublish'
+import { buildSheetCsvUrl, loadStoredCaVersion, parseCaSheet } from '../utils/caSheetParser'
 
 function todayISO() {
   return new Date().toISOString().split('T')[0]
+}
+
+function currentMonthName() {
+  return new Date().toLocaleString('en-US', { month: 'long' })
 }
 
 function parseDayJson(text) {
@@ -43,6 +49,14 @@ function CAParser() {
   const [publishing, setPublishing] = useState(false)
   const [publishError, setPublishError] = useState('')
   const [publishResults, setPublishResults] = useState(null)
+
+  const [sheetTabName, setSheetTabName] = useState(currentMonthName)
+  const [sheetHasHeader, setSheetHasHeader] = useState(true)
+  const [sheetVersion, setSheetVersion] = useState(() => String(loadStoredCaVersion() + 1000))
+  const [sheetLoading, setSheetLoading] = useState(false)
+  const [sheetError, setSheetError] = useState('')
+  const [sheetParsed, setSheetParsed] = useState(null)
+  const [sheetShowJson, setSheetShowJson] = useState(false)
 
   const selectedDateDMY = useMemo(() => (selectedDate ? isoToDMY(selectedDate) : ''), [selectedDate])
   const monthKey = useMemo(() => (selectedDateDMY ? monthKeyFromDMY(selectedDateDMY) : ''), [selectedDateDMY])
@@ -80,6 +94,45 @@ function CAParser() {
   useEffect(() => {
     loadCurrentState()
   }, [])
+
+  async function handleFetchSheet() {
+    const tabName = sheetTabName.trim()
+    setSheetError('')
+    setSheetParsed(null)
+
+    if (!tabName) {
+      setSheetError('Enter a tab name (e.g. "July").')
+      return
+    }
+
+    setSheetLoading(true)
+    try {
+      const url = buildSheetCsvUrl(CA_SHEET_ID, tabName)
+      const res = await fetch(url, { cache: 'no-store' })
+      if (!res.ok) {
+        throw new Error(
+          `Failed to fetch tab "${tabName}" (${res.status}). Make sure the sheet is shared as ` +
+            '"Anyone with the link can view" and the tab name matches exactly.'
+        )
+      }
+      const csvText = await res.text()
+      const result = parseCaSheet(csvText, { version: Number(sheetVersion) || 0, hasHeader: sheetHasHeader })
+      if (result.cas.length === 0) {
+        throw new Error('No valid rows found. Check the tab name and that dates are in dd-mm-yyyy format.')
+      }
+      setSheetParsed(result)
+    } catch (err) {
+      setSheetError(err.message)
+    } finally {
+      setSheetLoading(false)
+    }
+  }
+
+  function handleDownloadSheetJson() {
+    if (!sheetParsed) return
+    const json = JSON.stringify({ cas: sheetParsed.cas, questions: sheetParsed.questions }, null, 2)
+    downloadBlob(json, `${sheetTabName.trim() || 'ca'}.json`, 'application/json')
+  }
 
   useEffect(() => {
     if (!preview) return
@@ -209,6 +262,104 @@ function CAParser() {
           </button>
         </div>
       </section>
+
+      <section className="form-card">
+        <h3>Fetch from Google Sheet</h3>
+        <p className="field-hint">
+          Reads a month tab directly from the Current Affairs content sheet and parses it into
+          the same {`{ cas, questions }`} shape the desktop tool used to produce from the .tsv file.
+        </p>
+
+        <div className="form-grid">
+          <label className="field">
+            <span>Tab name</span>
+            <input
+              type="text"
+              value={sheetTabName}
+              onChange={(e) => setSheetTabName(e.target.value)}
+              placeholder="e.g. July"
+            />
+          </label>
+          <label className="field">
+            <span>Version (ver)</span>
+            <input type="text" value={sheetVersion} onChange={(e) => setSheetVersion(e.target.value)} />
+          </label>
+          <label className="field" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={sheetHasHeader}
+              onChange={(e) => setSheetHasHeader(e.target.checked)}
+            />
+            <span>First row is a header</span>
+          </label>
+        </div>
+
+        {sheetError && <div className="alert alert-error">{sheetError}</div>}
+
+        <div className="form-actions">
+          <button type="button" className="btn btn-primary" onClick={handleFetchSheet} disabled={sheetLoading}>
+            {sheetLoading ? 'Fetching…' : 'Fetch & Parse'}
+          </button>
+        </div>
+      </section>
+
+      {sheetParsed && (
+        <section className="result-card">
+          <div className="result-toolbar">
+            <h3>Parsed preview — {sheetParsed.cas.length} entries</h3>
+            <div className="result-actions">
+              <button type="button" className="btn btn-ghost" onClick={() => setSheetShowJson((v) => !v)}>
+                {sheetShowJson ? 'Show table' : 'Show raw JSON'}
+              </button>
+              <button type="button" className="btn btn-primary" onClick={handleDownloadSheetJson}>
+                Download JSON
+              </button>
+            </div>
+          </div>
+
+          {sheetParsed.skipped > 0 && (
+            <div style={{ padding: '0 20px', marginTop: 16 }}>
+              <div className="alert alert-error">
+                Skipped {sheetParsed.skipped} row{sheetParsed.skipped === 1 ? '' : 's'} with a missing or
+                malformed date.
+              </div>
+            </div>
+          )}
+
+          {sheetShowJson ? (
+            <pre className="json-preview">
+              {JSON.stringify({ cas: sheetParsed.cas, questions: sheetParsed.questions }, null, 2)}
+            </pre>
+          ) : (
+            <div className="ca-table-wrap">
+              <table className="ca-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Date</th>
+                    <th>Category</th>
+                    <th>Title (EN)</th>
+                    <th>Title (HI)</th>
+                    <th>Title (TA)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sheetParsed.cas.map((c) => (
+                    <tr key={c.id}>
+                      <td>{c.id}</td>
+                      <td>{c.date}</td>
+                      <td>{c.category}</td>
+                      <td>{c.title_en}</td>
+                      <td>{c.title_hi}</td>
+                      <td>{c.title_ta}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="form-card">
         <div className="form-grid">
