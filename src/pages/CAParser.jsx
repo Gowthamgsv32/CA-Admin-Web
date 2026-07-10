@@ -1,22 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import {
-  CA_ROOT_URL,
-  CA_SHEET_ID,
-  CURRENT_AFFAIRS_BASE,
-  DAILY_BYTES_BASE,
-  ROOT_URL,
-  VER_FILE_URL,
-  WORKER_URL,
-} from '../config/api'
-import { bytesToBase64, createZip } from '../utils/zip'
+import { CA_ROOT_URL, CA_SHEET_ID, CURRENT_AFFAIRS_BASE, ROOT_URL, VER_FILE_URL, WORKER_URL } from '../config/api'
 import { downloadBlob } from '../utils/download'
-import {
-  buildNextRoot,
-  buildNextVerFile,
-  isoToDMY,
-  mergeMonthJson,
-  monthKeyFromDMY,
-} from '../utils/dailyBytesPublish'
+import { isoToDMY, monthKeyFromDMY } from '../utils/dailyBytesPublish'
 import { buildSheetCsvUrl, parseCaSheet } from '../utils/caSheetParser'
 import { buildNextCaRoot } from '../utils/caPublish'
 
@@ -28,24 +13,9 @@ function currentMonthName() {
   return new Date().toLocaleString('en-US', { month: 'long' })
 }
 
-// Sorts dd-mm-yyyy strings chronologically by rewriting to yyyymmdd for comparison.
-function dmyToComparable(dmy) {
+function dmyToISO(dmy) {
   const [d, m, y] = dmy.split('-')
-  return `${y}${m}${d}`
-}
-
-function parseDayJson(text) {
-  if (!text.trim()) return { data: null, error: '' }
-  try {
-    const parsed = JSON.parse(text)
-    if (!Array.isArray(parsed.cas)) throw new Error('Missing a "cas" array.')
-    if (parsed.questions && !Array.isArray(parsed.questions)) {
-      throw new Error('"questions" must be an array.')
-    }
-    return { data: parsed, error: '' }
-  } catch (err) {
-    return { data: null, error: err.message }
-  }
+  return `${y}-${m}-${d}`
 }
 
 function CAParser() {
@@ -53,17 +23,6 @@ function CAParser() {
   const [currentVerFile, setCurrentVerFile] = useState(null)
   const [loadingCurrent, setLoadingCurrent] = useState(true)
   const [currentError, setCurrentError] = useState('')
-
-  const [selectedDate, setSelectedDate] = useState(todayISO)
-  const [dayJsonText, setDayJsonText] = useState('')
-
-  const [rootVerInput, setRootVerInput] = useState('')
-  const [monthVerInput, setMonthVerInput] = useState('')
-  const [verFileVerInput, setVerFileVerInput] = useState('')
-
-  const [publishing, setPublishing] = useState(false)
-  const [publishError, setPublishError] = useState('')
-  const [publishResults, setPublishResults] = useState(null)
 
   const [sheetTabName, setSheetTabName] = useState(currentMonthName)
   const [sheetHasHeader, setSheetHasHeader] = useState(true)
@@ -76,7 +35,7 @@ function CAParser() {
   const [caRoot, setCaRoot] = useState(null)
   const [caRootLoading, setCaRootLoading] = useState(false)
   const [caRootError, setCaRootError] = useState('')
-  const [genDate, setGenDate] = useState('')
+  const [genDate, setGenDate] = useState(() => isoToDMY(todayISO()))
 
   const [remoteMonthQuestions, setRemoteMonthQuestions] = useState(null)
   const [remoteMonthLoading, setRemoteMonthLoading] = useState(false)
@@ -85,20 +44,6 @@ function CAParser() {
   const [generatedQuestions, setGeneratedQuestions] = useState([])
   const [questionsLoading, setQuestionsLoading] = useState(false)
   const [questionsError, setQuestionsError] = useState('')
-
-  const selectedDateDMY = useMemo(() => (selectedDate ? isoToDMY(selectedDate) : ''), [selectedDate])
-  const monthKey = useMemo(() => (selectedDateDMY ? monthKeyFromDMY(selectedDateDMY) : ''), [selectedDateDMY])
-  const dayJsonParsed = useMemo(() => parseDayJson(dayJsonText), [dayJsonText])
-
-  const preview = useMemo(() => {
-    if (!currentRoot || !selectedDateDMY || !dayJsonParsed.data) return null
-    return buildNextRoot({
-      currentRoot,
-      selectedDateDMY,
-      casCount: dayJsonParsed.data.cas.length,
-      baseUrl: DAILY_BYTES_BASE,
-    })
-  }, [currentRoot, selectedDateDMY, dayJsonParsed.data])
 
   async function loadCurrentState() {
     setLoadingCurrent(true)
@@ -162,18 +107,6 @@ function CAParser() {
     downloadBlob(json, `${sheetTabName.trim() || 'ca'}.json`, 'application/json')
   }
 
-  const genDateOptions = useMemo(() => {
-    if (!sheetParsed) return []
-    const set = new Set(sheetParsed.cas.map((c) => c.date))
-    return [...set].sort((a, b) => dmyToComparable(b).localeCompare(dmyToComparable(a)))
-  }, [sheetParsed])
-
-  useEffect(() => {
-    if (genDateOptions.length > 0 && !genDateOptions.includes(genDate)) {
-      setGenDate(genDateOptions[0])
-    }
-  }, [genDateOptions]) // eslint-disable-line react-hooks/exhaustive-deps
-
   async function handleLoadCaRoot() {
     setCaRootError('')
     setCaRootLoading(true)
@@ -212,6 +145,9 @@ function CAParser() {
     return { cas: sheetParsed.cas, questions: [...(remoteMonthQuestions || []), ...generatedQuestions] }
   }, [sheetParsed, remoteMonthQuestions, generatedQuestions])
 
+  // The month json url/key is always derived from whichever date is picked —
+  // pick a different date and everything below (existing question count,
+  // month file fetched, root av_mos entry updated) follows automatically.
   const genMonthKey = useMemo(() => (genDate ? monthKeyFromDMY(genDate) : ''), [genDate])
 
   // A newly generated batch only makes sense for the date/month it was
@@ -285,6 +221,9 @@ function CAParser() {
     }
   }
 
+  // Recomputes automatically whenever monthJsonPreview changes (e.g. right
+  // after generating questions), so the root av_mos entry's cas/questions
+  // counts in its "desc" always reflect the current month data.
   const rootPreview = useMemo(() => {
     if (!caRoot || !genDate || !monthJsonPreview) return null
     return buildNextCaRoot({
@@ -310,112 +249,6 @@ function CAParser() {
     if (!rootPreview) return
     downloadBlob(JSON.stringify(rootPreview.root, null, 2), 'root.json', 'application/json')
   }
-
-  useEffect(() => {
-    if (!preview) return
-    setRootVerInput(preview.root.ver)
-    setMonthVerInput(preview.root.av_mos[preview.monthEntryIndex].ver)
-  }, [preview])
-
-  useEffect(() => {
-    if (!currentVerFile || !selectedDateDMY) return
-    setVerFileVerInput(String(Number(currentVerFile.ver) + 1))
-  }, [currentVerFile, selectedDateDMY])
-
-  async function handlePublish() {
-    setPublishError('')
-    setPublishResults(null)
-
-    if (!currentRoot || !currentVerFile) {
-      setPublishError('Current root/version files have not loaded yet.')
-      return
-    }
-    if (!dayJsonParsed.data) {
-      setPublishError(dayJsonParsed.error || 'Please paste valid day JSON first.')
-      return
-    }
-
-    setPublishing(true)
-    try {
-      let currentMonthJson = null
-      try {
-        const res = await fetch(`${DAILY_BYTES_BASE}/${monthKey}.json`, { cache: 'no-store' })
-        if (res.ok) currentMonthJson = await res.json()
-      } catch {
-        // Treated as a brand-new month below.
-      }
-
-      const nextMonthJson = mergeMonthJson({ currentMonthJson, dayJson: dayJsonParsed.data })
-
-      const { root: computedRoot, monthEntryIndex } = buildNextRoot({
-        currentRoot,
-        selectedDateDMY,
-        casCount: dayJsonParsed.data.cas.length,
-        baseUrl: DAILY_BYTES_BASE,
-      })
-
-      const finalRoot = { ...computedRoot, ver: String(rootVerInput) }
-      finalRoot.av_mos = finalRoot.av_mos.map((entry, i) =>
-        i === monthEntryIndex ? { ...entry, ver: String(monthVerInput) } : entry
-      )
-
-      const finalVerFile = {
-        ...buildNextVerFile({ currentVerFile, selectedDateDMY }),
-        ver: Number(verFileVerInput),
-      }
-
-      const zipBytes = createZip([
-        { name: `${monthKey}.json`, data: new TextEncoder().encode(JSON.stringify(nextMonthJson)) },
-      ])
-
-      const files = [
-        {
-          key: `Daily_Bytes/${selectedDateDMY}.json`,
-          contentType: 'application/json',
-          body: JSON.stringify(dayJsonParsed.data),
-        },
-        {
-          key: `Daily_Bytes/${monthKey}.json`,
-          contentType: 'application/json',
-          body: JSON.stringify(nextMonthJson),
-        },
-        {
-          key: 'Daily_Bytes/daily-bytes-root.json',
-          contentType: 'application/json',
-          body: JSON.stringify(finalRoot),
-        },
-        {
-          key: 'Daily_Bytes/daily-bytes-ver.json',
-          contentType: 'application/json',
-          body: JSON.stringify(finalVerFile),
-        },
-        {
-          key: `Daily_Bytes/${monthKey}.zip`,
-          contentType: 'application/zip',
-          bodyBase64: bytesToBase64(zipBytes),
-        },
-      ]
-
-      const res = await fetch(`${WORKER_URL}/publish`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ files }),
-      })
-      const result = await res.json()
-      setPublishResults(result.results)
-
-      if (result.results?.every((r) => r.success)) {
-        setCurrentRoot(finalRoot)
-        setCurrentVerFile(finalVerFile)
-      }
-    } catch (err) {
-      setPublishError(`Publish failed: ${err.message}`)
-    } finally {
-      setPublishing(false)
-    }
-  }
-
-  const monthEntry = preview?.root.av_mos[preview.monthEntryIndex]
 
   return (
     <div className="page">
@@ -561,15 +394,17 @@ function CAParser() {
           <div className="form-grid">
             <label className="field">
               <span>Day</span>
-              <select value={genDate} onChange={(e) => setGenDate(e.target.value)}>
-                {genDateOptions.map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
-                ))}
-              </select>
+              <input
+                type="date"
+                value={dmyToISO(genDate)}
+                onChange={(e) => setGenDate(isoToDMY(e.target.value))}
+              />
             </label>
           </div>
+
+          {dayJsonPreview && dayJsonPreview.cas.length === 0 && (
+            <p className="field-hint">No cas entries in the parsed sheet for this date.</p>
+          )}
 
           {remoteMonthLoading && <p className="field-hint">Loading existing {genMonthKey}.json questions…</p>}
           {remoteMonthError && (
@@ -663,86 +498,6 @@ function CAParser() {
                 }.`}
           </p>
           <pre className="json-preview">{JSON.stringify(rootPreview.root, null, 2)}</pre>
-        </section>
-      )}
-
-      <section className="form-card">
-        <div className="form-grid">
-          <label className="field">
-            <span>Date</span>
-            <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} />
-          </label>
-        </div>
-
-        <label className="field">
-          <span>Day JSON ({`cas` } + {`questions`})</span>
-          <textarea
-            rows={10}
-            className="textarea-mono"
-            value={dayJsonText}
-            onChange={(e) => setDayJsonText(e.target.value)}
-            placeholder="Paste the day's JSON here…"
-          />
-          {dayJsonParsed.error && <span className="field-hint">{dayJsonParsed.error}</span>}
-          {dayJsonParsed.data && (
-            <span className="field-hint">
-              {dayJsonParsed.data.cas.length} cas cards · {(dayJsonParsed.data.questions || []).length} questions
-            </span>
-          )}
-        </label>
-
-        {preview && (
-          <div className="form-grid">
-            <label className="field">
-              <span>Root version</span>
-              <input type="text" value={rootVerInput} onChange={(e) => setRootVerInput(e.target.value)} />
-            </label>
-            <label className="field">
-              <span>Version file</span>
-              <input type="text" value={verFileVerInput} onChange={(e) => setVerFileVerInput(e.target.value)} />
-            </label>
-            <label className="field">
-              <span>{preview.isNewMonth ? `New month (${monthEntry?.month}) version` : `${monthEntry?.month} version`}</span>
-              <input type="text" value={monthVerInput} onChange={(e) => setMonthVerInput(e.target.value)} />
-            </label>
-          </div>
-        )}
-
-        {preview && (
-          <p className="field-hint">
-            {preview.isNewMonth
-              ? `Will create a new month entry: "${monthEntry?.title}" (${monthEntry?.desc}).`
-              : `Will update "${monthEntry?.title}" to ${monthEntry?.desc}.`}
-            {' '}Day file: Daily_Bytes/{selectedDateDMY}.json
-          </p>
-        )}
-
-        {publishError && <div className="alert alert-error">{publishError}</div>}
-
-        <div className="form-actions">
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={handlePublish}
-            disabled={publishing || !preview}
-          >
-            {publishing ? 'Publishing…' : 'Publish'}
-          </button>
-        </div>
-      </section>
-
-      {publishResults && (
-        <section className="result-card">
-          <div className="result-toolbar">
-            <h3>Publish results</h3>
-          </div>
-          <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {publishResults.map((r) => (
-              <div key={r.key} className={`alert ${r.success ? 'alert-success' : 'alert-error'}`}>
-                {r.key} — {r.success ? 'uploaded' : r.error}
-              </div>
-            ))}
-          </div>
         </section>
       )}
     </div>
