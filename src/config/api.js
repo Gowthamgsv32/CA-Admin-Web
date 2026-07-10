@@ -11,6 +11,8 @@ export const VER_FILE_URL = `${DAILY_BYTES_BASE}/daily-bytes-ver.json`
 
 export const CURRENT_AFFAIRS_BASE = 'https://healthappobjects.ams3.cdn.digitaloceanspaces.com/CurrentAffairs'
 
+export const CA_ROOT_URL = `${CURRENT_AFFAIRS_BASE}/root.json`
+
 export const RECALL_GAME_BASE = 'https://healthappobjects.ams3.cdn.digitaloceanspaces.com/Recall-Game'
 
 export const RECALL_GAME_ROOT_URL = `${RECALL_GAME_BASE}/recall-root.json`

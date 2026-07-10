@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CA_SHEET_ID, DAILY_BYTES_BASE, ROOT_URL, VER_FILE_URL, WORKER_URL } from '../config/api'
+import {
+  CA_ROOT_URL,
+  CA_SHEET_ID,
+  CURRENT_AFFAIRS_BASE,
+  DAILY_BYTES_BASE,
+  ROOT_URL,
+  VER_FILE_URL,
+  WORKER_URL,
+} from '../config/api'
 import { bytesToBase64, createZip } from '../utils/zip'
 import { downloadBlob } from '../utils/download'
 import {
@@ -10,6 +18,7 @@ import {
   monthKeyFromDMY,
 } from '../utils/dailyBytesPublish'
 import { buildSheetCsvUrl, loadStoredCaVersion, parseCaSheet } from '../utils/caSheetParser'
+import { buildNextCaRoot } from '../utils/caPublish'
 
 function todayISO() {
   return new Date().toISOString().split('T')[0]
@@ -17,6 +26,12 @@ function todayISO() {
 
 function currentMonthName() {
   return new Date().toLocaleString('en-US', { month: 'long' })
+}
+
+// Sorts dd-mm-yyyy strings chronologically by rewriting to yyyymmdd for comparison.
+function dmyToComparable(dmy) {
+  const [d, m, y] = dmy.split('-')
+  return `${y}${m}${d}`
 }
 
 function parseDayJson(text) {
@@ -57,6 +72,11 @@ function CAParser() {
   const [sheetError, setSheetError] = useState('')
   const [sheetParsed, setSheetParsed] = useState(null)
   const [sheetShowJson, setSheetShowJson] = useState(false)
+
+  const [caRoot, setCaRoot] = useState(null)
+  const [caRootLoading, setCaRootLoading] = useState(false)
+  const [caRootError, setCaRootError] = useState('')
+  const [genDate, setGenDate] = useState('')
 
   const selectedDateDMY = useMemo(() => (selectedDate ? isoToDMY(selectedDate) : ''), [selectedDate])
   const monthKey = useMemo(() => (selectedDateDMY ? monthKeyFromDMY(selectedDateDMY) : ''), [selectedDateDMY])
@@ -132,6 +152,76 @@ function CAParser() {
     if (!sheetParsed) return
     const json = JSON.stringify({ cas: sheetParsed.cas, questions: sheetParsed.questions }, null, 2)
     downloadBlob(json, `${sheetTabName.trim() || 'ca'}.json`, 'application/json')
+  }
+
+  const genDateOptions = useMemo(() => {
+    if (!sheetParsed) return []
+    const set = new Set(sheetParsed.cas.map((c) => c.date))
+    return [...set].sort((a, b) => dmyToComparable(b).localeCompare(dmyToComparable(a)))
+  }, [sheetParsed])
+
+  useEffect(() => {
+    if (genDateOptions.length > 0 && !genDateOptions.includes(genDate)) {
+      setGenDate(genDateOptions[0])
+    }
+  }, [genDateOptions]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleLoadCaRoot() {
+    setCaRootError('')
+    setCaRootLoading(true)
+    try {
+      const res = await fetch(CA_ROOT_URL, { cache: 'no-store' })
+      if (!res.ok) throw new Error(`Failed to load root.json (${res.status})`)
+      setCaRoot(await res.json())
+    } catch (err) {
+      setCaRootError(err.message)
+    } finally {
+      setCaRootLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (sheetParsed && !caRoot && !caRootLoading) {
+      handleLoadCaRoot()
+    }
+  }, [sheetParsed]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const dayJsonPreview = useMemo(() => {
+    if (!sheetParsed || !genDate) return null
+    return { cas: sheetParsed.cas.filter((c) => c.date === genDate), questions: [] }
+  }, [sheetParsed, genDate])
+
+  const monthJsonPreview = useMemo(() => {
+    if (!sheetParsed) return null
+    return { cas: sheetParsed.cas, questions: sheetParsed.questions }
+  }, [sheetParsed])
+
+  const genMonthKey = useMemo(() => (genDate ? monthKeyFromDMY(genDate) : ''), [genDate])
+
+  const rootPreview = useMemo(() => {
+    if (!caRoot || !genDate || !monthJsonPreview) return null
+    return buildNextCaRoot({
+      currentRoot: caRoot,
+      selectedDateDMY: genDate,
+      monthCasCount: monthJsonPreview.cas.length,
+      monthQuestionsCount: monthJsonPreview.questions.length,
+      baseUrl: CURRENT_AFFAIRS_BASE,
+    })
+  }, [caRoot, genDate, monthJsonPreview])
+
+  function handleDownloadDayJson() {
+    if (!dayJsonPreview || !genDate) return
+    downloadBlob(JSON.stringify(dayJsonPreview, null, 2), `${genDate}.json`, 'application/json')
+  }
+
+  function handleDownloadMonthJson() {
+    if (!monthJsonPreview || !genMonthKey) return
+    downloadBlob(JSON.stringify(monthJsonPreview, null, 2), `${genMonthKey}.json`, 'application/json')
+  }
+
+  function handleDownloadRootJson() {
+    if (!rootPreview) return
+    downloadBlob(JSON.stringify(rootPreview.root, null, 2), 'root.json', 'application/json')
   }
 
   useEffect(() => {
@@ -358,6 +448,88 @@ function CAParser() {
               </table>
             </div>
           )}
+        </section>
+      )}
+
+      {sheetParsed && (
+        <section className="form-card">
+          <h3>Generate CA files</h3>
+          <p className="field-hint">
+            Builds the day, month, and root JSON files from the parsed sheet data above, against the live
+            root.json on Spaces.
+          </p>
+
+          <div className="form-grid">
+            <label className="field">
+              <span>Day</span>
+              <select value={genDate} onChange={(e) => setGenDate(e.target.value)}>
+                {genDateOptions.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          {caRootLoading && <p className="field-hint">Loading current root.json…</p>}
+          {caRootError && <div className="alert alert-error">{caRootError}</div>}
+          {caRoot && !caRootLoading && (
+            <p className="field-hint">
+              Live date {caRoot.date} · root ver {caRoot.ver}
+            </p>
+          )}
+
+          <div className="form-actions">
+            <button type="button" className="btn btn-ghost" onClick={handleLoadCaRoot} disabled={caRootLoading}>
+              Refresh root.json
+            </button>
+          </div>
+        </section>
+      )}
+
+      {rootPreview && dayJsonPreview && monthJsonPreview && (
+        <section className="result-card">
+          <div className="result-toolbar">
+            <h3>Day JSON — {genDate}.json</h3>
+            <div className="result-actions">
+              <span className="field-hint">{dayJsonPreview.cas.length} entries</span>
+              <button type="button" className="btn btn-ghost" onClick={handleDownloadDayJson}>
+                Download
+              </button>
+            </div>
+          </div>
+          <pre className="json-preview">{JSON.stringify(dayJsonPreview, null, 2)}</pre>
+
+          <div className="result-toolbar">
+            <h3>Month JSON — {genMonthKey}.json</h3>
+            <div className="result-actions">
+              <span className="field-hint">
+                {monthJsonPreview.cas.length} cas · {monthJsonPreview.questions.length} questions
+              </span>
+              <button type="button" className="btn btn-ghost" onClick={handleDownloadMonthJson}>
+                Download
+              </button>
+            </div>
+          </div>
+          <pre className="json-preview">{JSON.stringify(monthJsonPreview, null, 2)}</pre>
+
+          <div className="result-toolbar">
+            <h3>Root JSON{rootPreview.isNewMonth ? ' — new month entry' : ''}</h3>
+            <div className="result-actions">
+              <button type="button" className="btn btn-primary" onClick={handleDownloadRootJson}>
+                Download
+              </button>
+            </div>
+          </div>
+          <p className="field-hint" style={{ padding: '0 20px' }}>
+            {rootPreview.isNewMonth
+              ? `Will create a new month entry: "${rootPreview.root.av_mos[rootPreview.monthEntryIndex].title}".`
+              : `Will update "${rootPreview.root.av_mos[rootPreview.monthEntryIndex].title}" to ${
+                  rootPreview.root.av_mos[rootPreview.monthEntryIndex].desc
+                }.`}
+          </p>
+          <pre className="json-preview">{JSON.stringify(rootPreview.root, null, 2)}</pre>
         </section>
       )}
 
