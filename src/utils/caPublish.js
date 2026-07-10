@@ -3,6 +3,7 @@
 // (not "bytes_url") and its av_mos desc carries two counts — cas and
 // questions — rather than a single "N Daily Bytes" count.
 import { dayOfMonthFromDMY, monthKeyFromDMY, monthNameFromDMY } from './dailyBytesPublish.js'
+import { createZip } from './zip.js'
 
 // Returns { root, monthEntryIndex, isNewMonth } — `root` is the full next
 // root.json (av_mos patched in place) for the given day's cas/questions
@@ -50,4 +51,11 @@ export function buildNextCaRoot({ currentRoot, selectedDateDMY, monthCasCount, m
   }
 
   return { root: nextRoot, monthEntryIndex: 0, isNewMonth: true }
+}
+
+// Packages the month json into a single-entry zip — the format both the
+// "Download All" bundle and the Spaces upload use for `{monthKey}.zip`,
+// matching root.json av_mos[i].zip_url.
+export function buildMonthZipBytes(monthJson, monthKey) {
+  return createZip([{ name: `${monthKey}.json`, data: new TextEncoder().encode(JSON.stringify(monthJson)) }])
 }
