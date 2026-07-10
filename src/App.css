@@ -468,6 +468,44 @@
   word-break: break-word;
 }
 
+.ca-table-wrap {
+  max-height: 480px;
+  overflow: auto;
+  margin: 0 20px 20px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.ca-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.ca-table th,
+.ca-table td {
+  padding: 10px 12px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ca-table th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-weight: 600;
+  z-index: 1;
+}
+
+.ca-table tbody tr:hover {
+  background: var(--accent-soft);
+}
+
 /* Multi-select dropdown */
 .multiselect {
   position: relative;
