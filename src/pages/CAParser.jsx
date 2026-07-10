@@ -78,6 +78,14 @@ function CAParser() {
   const [caRootError, setCaRootError] = useState('')
   const [genDate, setGenDate] = useState('')
 
+  const [remoteMonthQuestions, setRemoteMonthQuestions] = useState(null)
+  const [remoteMonthLoading, setRemoteMonthLoading] = useState(false)
+  const [remoteMonthError, setRemoteMonthError] = useState('')
+
+  const [generatedQuestions, setGeneratedQuestions] = useState([])
+  const [questionsLoading, setQuestionsLoading] = useState(false)
+  const [questionsError, setQuestionsError] = useState('')
+
   const selectedDateDMY = useMemo(() => (selectedDate ? isoToDMY(selectedDate) : ''), [selectedDate])
   const monthKey = useMemo(() => (selectedDateDMY ? monthKeyFromDMY(selectedDateDMY) : ''), [selectedDateDMY])
   const dayJsonParsed = useMemo(() => parseDayJson(dayJsonText), [dayJsonText])
@@ -196,15 +204,86 @@ function CAParser() {
 
   const dayJsonPreview = useMemo(() => {
     if (!sheetParsed || !genDate) return null
-    return { cas: sheetParsed.cas.filter((c) => c.date === genDate), questions: [] }
-  }, [sheetParsed, genDate])
+    return { cas: sheetParsed.cas.filter((c) => c.date === genDate), questions: generatedQuestions }
+  }, [sheetParsed, genDate, generatedQuestions])
 
   const monthJsonPreview = useMemo(() => {
     if (!sheetParsed) return null
-    return { cas: sheetParsed.cas, questions: sheetParsed.questions }
-  }, [sheetParsed])
+    return { cas: sheetParsed.cas, questions: [...(remoteMonthQuestions || []), ...generatedQuestions] }
+  }, [sheetParsed, remoteMonthQuestions, generatedQuestions])
 
   const genMonthKey = useMemo(() => (genDate ? monthKeyFromDMY(genDate) : ''), [genDate])
+
+  // A newly generated batch only makes sense for the date/month it was
+  // generated for — switching either invalidates it and re-fetches the
+  // existing month's questions so qid numbering starts from the right place.
+  useEffect(() => {
+    setGeneratedQuestions([])
+  }, [genDate])
+
+  useEffect(() => {
+    if (!genMonthKey) return
+    setRemoteMonthError('')
+    setRemoteMonthLoading(true)
+    fetch(`${CURRENT_AFFAIRS_BASE}/${genMonthKey}.json`, { cache: 'no-store' })
+      .then((res) => {
+        if (!res.ok) {
+          if (res.status === 404 || res.status === 403) return { questions: [] }
+          throw new Error(`Failed to load ${genMonthKey}.json (${res.status})`)
+        }
+        return res.json()
+      })
+      .then((data) => setRemoteMonthQuestions(Array.isArray(data.questions) ? data.questions : []))
+      .catch((err) => {
+        setRemoteMonthError(err.message)
+        setRemoteMonthQuestions([])
+      })
+      .finally(() => setRemoteMonthLoading(false))
+  }, [genMonthKey])
+
+  async function handleGenerateQuestions() {
+    setQuestionsError('')
+
+    if (!dayJsonPreview || dayJsonPreview.cas.length === 0) {
+      setQuestionsError('No cas entries for the selected date.')
+      return
+    }
+
+    setQuestionsLoading(true)
+    try {
+      const res = await fetch(`${WORKER_URL}/generate-ca-questions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cas: dayJsonPreview.cas.map((c) => ({
+            title_en: c.title_en,
+            desc_en: c.desc_en,
+            category: c.category,
+            date: c.date,
+          })),
+        }),
+      })
+      const result = await res.json()
+      if (!res.ok) throw new Error(result.error || `Request failed (${res.status})`)
+
+      const expected = dayJsonPreview.cas.length * 2
+      if (!Array.isArray(result.data) || result.data.length !== expected) {
+        throw new Error(`Expected ${expected} questions, got ${result.data?.length ?? 0}.`)
+      }
+
+      const dateDigits = genDate.replace(/-/g, '')
+      const startSeq = (remoteMonthQuestions?.length || 0) + 1
+      const stamped = result.data.map((q, i) => ({
+        qid: Number(`${dateDigits}${startSeq + i}`),
+        ...q,
+      }))
+      setGeneratedQuestions(stamped)
+    } catch (err) {
+      setQuestionsError(err.message)
+    } finally {
+      setQuestionsLoading(false)
+    }
+  }
 
   const rootPreview = useMemo(() => {
     if (!caRoot || !genDate || !monthJsonPreview) return null
@@ -490,6 +569,40 @@ function CAParser() {
                 ))}
               </select>
             </label>
+          </div>
+
+          {remoteMonthLoading && <p className="field-hint">Loading existing {genMonthKey}.json questions…</p>}
+          {remoteMonthError && (
+            <p className="field-hint">
+              Couldn't load existing {genMonthKey}.json ({remoteMonthError}) — treating as 0 existing questions.
+            </p>
+          )}
+          {remoteMonthQuestions && !remoteMonthLoading && genDate && (
+            <p className="field-hint">
+              {remoteMonthQuestions.length} existing question{remoteMonthQuestions.length === 1 ? '' : 's'} in{' '}
+              {genMonthKey}.json · next qid starts at {genDate.replace(/-/g, '')}
+              {remoteMonthQuestions.length + 1}
+            </p>
+          )}
+
+          {questionsError && <div className="alert alert-error">{questionsError}</div>}
+
+          <div className="form-actions">
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleGenerateQuestions}
+              disabled={questionsLoading || remoteMonthLoading || !dayJsonPreview || dayJsonPreview.cas.length === 0}
+            >
+              {questionsLoading
+                ? 'Generating…'
+                : `Generate Questions (${dayJsonPreview ? dayJsonPreview.cas.length * 2 : 0})`}
+            </button>
+            {generatedQuestions.length > 0 && (
+              <span className="field-hint">
+                {generatedQuestions.length} generated for {genDate}
+              </span>
+            )}
           </div>
 
           {caRootLoading && <p className="field-hint">Loading current root.json…</p>}
