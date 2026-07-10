@@ -2,6 +2,7 @@ import { PROMPTS } from './prompts.js'
 import { buildResultHtml, buildGrammarHtml, buildPhraseHtml, buildWordHtml } from './html.js'
 import { putObjectToSpaces } from './spaces.js'
 import { buildRecallGamePrompt } from './recallGamePrompts.js'
+import { buildTnpscPrompt } from './tnpscPrompts.js'
 
 const HTML_BUILDERS = {
   spoken: buildResultHtml,
@@ -39,13 +40,19 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+const DEFAULT_GENERATION_CONFIG = {
+  temperature: 0.7,
+  maxOutputTokens: 2048,
+  thinkingConfig: { thinkingBudget: 0 },
+}
+
 // Tries each key in order. A 429 (quota exceeded) moves on to the next key
 // immediately since retrying the same key won't help. A 503 ("the model is
 // currently experiencing high demand") is usually a transient overload on
 // Google's side, so that key gets one quick retry before falling through to
 // the next key. Any other response (success or a real error) is returned
 // immediately.
-async function callGeminiWithFallback(promptText, apiKeys) {
+async function callGeminiWithFallback(promptText, apiKeys, generationConfig = DEFAULT_GENERATION_CONFIG) {
   let lastError = null
 
   for (const apiKey of apiKeys) {
@@ -59,11 +66,7 @@ async function callGeminiWithFallback(promptText, apiKeys) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents: [{ parts: [{ text: promptText }] }],
-            generationConfig: {
-              temperature: 0.7,
-              maxOutputTokens: 2048,
-              thinkingConfig: { thinkingBudget: 0 },
-            },
+            generationConfig,
           }),
         }
       )
@@ -187,6 +190,53 @@ async function handleGenerateRecall(request, env) {
   return json(env, { data })
 }
 
+const TNPSC_GENERATION_CONFIG = {
+  temperature: 0.15,
+  maxOutputTokens: 65536,
+  thinkingConfig: { thinkingBudget: 0 },
+}
+
+// TNPSC Parser: turns one page-batch of PDF text into a large compound
+// response ("=== FILE 1: ... === === FILE 2: ... ===") rather than a single
+// JSON object. Splitting/parsing/retry-on-broken-JSON logic lives entirely
+// in the frontend (mirroring the desktop app's _split_and_save), so this
+// just proxies the raw model text back — no JSON.parse attempted here.
+async function handleGenerateTnpsc(request, env) {
+  const { params, pdfText } = await request.json()
+
+  if (!params?.subjectCode || !pdfText) {
+    return json(env, { error: 'Missing params or PDF text.' }, 400)
+  }
+
+  const apiKeys = parseApiKeys(env.GEMINI_API_KEY)
+  if (apiKeys.length === 0) {
+    return json(env, { error: 'No Gemini API key configured.' }, 500)
+  }
+
+  const prompt = buildTnpscPrompt(params, pdfText)
+
+  let geminiRes
+  try {
+    geminiRes = await callGeminiWithFallback(prompt, apiKeys, TNPSC_GENERATION_CONFIG)
+  } catch (err) {
+    return json(env, { error: `Gemini request failed on every API key: ${err.message}` }, 503)
+  }
+
+  const geminiBody = await geminiRes.json()
+  if (geminiBody.error) {
+    return json(env, { error: geminiBody.error.message }, 502)
+  }
+
+  const finishReason = geminiBody.candidates?.[0]?.finishReason
+  const rawText = geminiBody.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+
+  if (!rawText) {
+    return json(env, { error: `Gemini returned no text (finishReason: ${finishReason || 'unknown'}).` }, 502)
+  }
+
+  return json(env, { text: rawText, finishReason })
+}
+
 async function handleUpload(request, env) {
   const { date, json: jsonPayload } = await request.json()
 
@@ -258,6 +308,9 @@ export default {
       }
       if (request.method === 'POST' && url.pathname === '/generate-recall') {
         return await handleGenerateRecall(request, env)
+      }
+      if (request.method === 'POST' && url.pathname === '/generate-tnpsc') {
+        return await handleGenerateTnpsc(request, env)
       }
       if (request.method === 'POST' && url.pathname === '/upload') {
         return await handleUpload(request, env)
