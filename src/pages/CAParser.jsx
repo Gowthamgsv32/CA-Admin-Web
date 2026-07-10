@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { CA_ROOT_URL, CA_SHEET_ID, CURRENT_AFFAIRS_BASE, ROOT_URL, VER_FILE_URL, WORKER_URL } from '../config/api'
 import { downloadBlob } from '../utils/download'
+import { createZip, bytesToBase64 } from '../utils/zip'
 import { isoToDMY, monthKeyFromDMY } from '../utils/dailyBytesPublish'
 import { buildSheetCsvUrl, parseCaSheet } from '../utils/caSheetParser'
-import { buildNextCaRoot } from '../utils/caPublish'
+import { buildNextCaRoot, buildMonthZipBytes } from '../utils/caPublish'
 
 function todayISO() {
   return new Date().toISOString().split('T')[0]
@@ -44,6 +45,10 @@ function CAParser() {
   const [generatedQuestions, setGeneratedQuestions] = useState([])
   const [questionsLoading, setQuestionsLoading] = useState(false)
   const [questionsError, setQuestionsError] = useState('')
+
+  const [publishingCa, setPublishingCa] = useState(false)
+  const [publishCaError, setPublishCaError] = useState('')
+  const [publishCaResults, setPublishCaResults] = useState(null)
 
   async function loadCurrentState() {
     setLoadingCurrent(true)
@@ -248,6 +253,70 @@ function CAParser() {
   function handleDownloadRootJson() {
     if (!rootPreview) return
     downloadBlob(JSON.stringify(rootPreview.root, null, 2), 'root.json', 'application/json')
+  }
+
+  function handleDownloadAllZip() {
+    if (!rootPreview || !dayJsonPreview || !monthJsonPreview || !genDate || !genMonthKey) return
+    const monthZipBytes = buildMonthZipBytes(monthJsonPreview, genMonthKey)
+    const files = [
+      { name: 'root.json', data: new TextEncoder().encode(JSON.stringify(rootPreview.root, null, 2)) },
+      { name: `${genDate}.json`, data: new TextEncoder().encode(JSON.stringify(dayJsonPreview, null, 2)) },
+      { name: `${genMonthKey}.json`, data: new TextEncoder().encode(JSON.stringify(monthJsonPreview, null, 2)) },
+      { name: `${genMonthKey}.zip`, data: monthZipBytes },
+    ]
+    downloadBlob(createZip(files), `CurrentAffairs-${genDate}.zip`, 'application/zip')
+  }
+
+  async function handlePublishCaFiles() {
+    setPublishCaError('')
+    setPublishCaResults(null)
+
+    if (!rootPreview || !dayJsonPreview || !monthJsonPreview || !genDate || !genMonthKey) {
+      setPublishCaError('Generate the files first.')
+      return
+    }
+
+    setPublishingCa(true)
+    try {
+      const monthZipBytes = buildMonthZipBytes(monthJsonPreview, genMonthKey)
+
+      const files = [
+        { key: 'CurrentAffairs/root.json', contentType: 'application/json', body: JSON.stringify(rootPreview.root) },
+        {
+          key: `CurrentAffairs/${genDate}.json`,
+          contentType: 'application/json',
+          body: JSON.stringify(dayJsonPreview),
+        },
+        {
+          key: `CurrentAffairs/${genMonthKey}.json`,
+          contentType: 'application/json',
+          body: JSON.stringify(monthJsonPreview),
+        },
+        {
+          key: `CurrentAffairs/${genMonthKey}.zip`,
+          contentType: 'application/zip',
+          bodyBase64: bytesToBase64(monthZipBytes),
+        },
+      ]
+
+      const res = await fetch(`${WORKER_URL}/publish`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files }),
+      })
+      const result = await res.json()
+      setPublishCaResults(result.results)
+
+      if (result.results?.every((r) => r.success)) {
+        setCaRoot(rootPreview.root)
+        setRemoteMonthQuestions((prev) => [...(prev || []), ...generatedQuestions])
+        setGeneratedQuestions([])
+      }
+    } catch (err) {
+      setPublishCaError(`Publish failed: ${err.message}`)
+    } finally {
+      setPublishingCa(false)
+    }
   }
 
   return (
@@ -458,6 +527,39 @@ function CAParser() {
 
       {rootPreview && dayJsonPreview && monthJsonPreview && (
         <section className="result-card">
+          <div className="result-toolbar">
+            <h3>Generated files — {genDate}</h3>
+            <div className="result-actions">
+              <button type="button" className="btn btn-ghost" onClick={handleDownloadAllZip}>
+                Download All (ZIP)
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handlePublishCaFiles}
+                disabled={publishingCa}
+              >
+                {publishingCa ? 'Publishing…' : 'Publish to Spaces'}
+              </button>
+            </div>
+          </div>
+
+          {publishCaError && (
+            <div className="alert alert-error" style={{ margin: '16px 20px 0' }}>
+              {publishCaError}
+            </div>
+          )}
+
+          {publishCaResults && (
+            <div style={{ padding: '16px 20px 0', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {publishCaResults.map((r) => (
+                <div key={r.key} className={`alert ${r.success ? 'alert-success' : 'alert-error'}`}>
+                  {r.key} — {r.success ? 'uploaded' : r.error}
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="result-toolbar">
             <h3>Day JSON — {genDate}.json</h3>
             <div className="result-actions">
