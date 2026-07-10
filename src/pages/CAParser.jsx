@@ -185,12 +185,13 @@ function CAParser() {
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // The sheet stamps each cas row with a "ver" (used for client-side cache
-  // busting), computed as the live root.json's current month entry ver × 1000
-  // — e.g. av_mos[0].ver "10" -> 10000, matching the desktop tool's convention.
+  // busting). Publishing bumps both root.ver and the month's av_mos entry ver
+  // by 1, so the stamp should target that upcoming version, not the currently
+  // live one — e.g. av_mos[0].ver "10" -> next ver 11 -> stamp 11000.
   useEffect(() => {
     if (!caRoot) return
-    const monthVer = Number(caRoot.av_mos?.[0]?.ver) || 0
-    setSheetVersion(String(monthVer * 1000))
+    const nextMonthVer = (Number(caRoot.av_mos?.[0]?.ver) || 0) + 1
+    setSheetVersion(String(nextMonthVer * 1000))
   }, [caRoot])
 
   const dayJsonPreview = useMemo(() => {
@@ -383,7 +384,9 @@ function CAParser() {
             <span className="field-hint">
               {caRootLoading && 'Loading root.json…'}
               {caRootError && `Couldn't load root.json: ${caRootError}`}
-              {caRoot && !caRootLoading && `From root.json av_mos[0].ver (${caRoot.av_mos?.[0]?.ver}) × 1000`}
+              {caRoot &&
+                !caRootLoading &&
+                `Next av_mos[0].ver (${caRoot.av_mos?.[0]?.ver} + 1) × 1000`}
             </span>
           </label>
           <label className="field" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
