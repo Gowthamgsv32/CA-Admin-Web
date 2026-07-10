@@ -12,8 +12,6 @@
 // id = Number(date-with-dashes-removed + idSuffix), matching
 // `splittedList[1].replace("-", "") + splittedList[0]).toLong()`.
 
-const VERSION_STORAGE_KEY = 'caSheetJsonVersion'
-
 export function buildSheetCsvUrl(sheetId, tabName) {
   return `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tabName)}`
 }
@@ -125,14 +123,4 @@ export function parseCaSheet(csvText, { version, hasHeader = true }) {
   }
 
   return { cas, questions: [], skipped }
-}
-
-export function loadStoredCaVersion() {
-  try {
-    const raw = localStorage.getItem(VERSION_STORAGE_KEY)
-    const num = Number(raw)
-    return Number.isFinite(num) ? num : 0
-  } catch {
-    return 0
-  }
 }
