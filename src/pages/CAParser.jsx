@@ -413,13 +413,13 @@ function CAParser() {
               <div className="alert alert-error">
                 <div>
                   Skipped {sheetParsed.skipped} row{sheetParsed.skipped === 1 ? '' : 's'} with a missing or
-                  malformed date (sheet row numbers below).
+                  malformed date (column A value below — search for it in the sheet).
                 </div>
                 {sheetParsed.skippedSamples?.length > 0 && (
                   <ul style={{ margin: '8px 0 0', paddingLeft: 20 }}>
-                    {sheetParsed.skippedSamples.map((s) => (
-                      <li key={s.row}>
-                        Row {s.row} — "{s.title}" — date column: {s.rawDate}
+                    {sheetParsed.skippedSamples.map((s, i) => (
+                      <li key={`${s.serial}-${i}`}>
+                        Col A: {s.serial} — "{s.title}" — date column: {s.rawDate}
                       </li>
                     ))}
                     {sheetParsed.skipped > sheetParsed.skippedSamples.length && (

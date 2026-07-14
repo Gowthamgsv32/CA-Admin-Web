@@ -118,19 +118,20 @@ function normalizeDate(raw) {
 
 // Returns { cas, questions: [], skipped, skippedSamples } — skipped counts
 // rows dropped for having a missing/malformed date (so they can't be turned
-// into a valid id); skippedSamples holds a few { row, title, rawDate }
-// entries (capped at 10) identifying exactly which sheet row and title had
-// the problem, so it can be found and fixed directly in the sheet.
+// into a valid id); skippedSamples holds a few { serial, title, rawDate }
+// entries (capped at 10) identifying the problem row by its actual column A
+// value (not a computed sheet row number — that requires knowing exactly how
+// many header/title rows precede the data, which is easy to get off by one,
+// and column A is what's directly visible and searchable in the sheet anyway).
 export function parseCaSheet(csvText, { version, hasHeader = true }) {
   const rows = parseCsv(csvText)
   const dataRows = hasHeader ? rows.slice(1) : rows
-  const headerOffset = hasHeader ? 2 : 1 // first data row's 1-based sheet row number
 
   const cas = []
   let skipped = 0
   const skippedSamples = []
 
-  dataRows.forEach((row, i) => {
+  dataRows.forEach((row) => {
     const rawDate = row[1] || ''
     const titleEn = (row[2] || '').trim()
 
@@ -145,7 +146,7 @@ export function parseCaSheet(csvText, { version, hasHeader = true }) {
       skipped++
       if (skippedSamples.length < 10) {
         skippedSamples.push({
-          row: i + headerOffset,
+          serial: (row[0] || '').trim() || '(blank)',
           title: titleEn || '(no title)',
           rawDate: rawDate.trim() || '(empty)',
         })
