@@ -97,6 +97,7 @@ function RecallGameParser() {
 
   const [publishing, setPublishing] = useState(false)
   const [publishStatus, setPublishStatus] = useState(null)
+  const [purgeStatus, setPurgeStatus] = useState(null)
 
   const url = `${CURRENT_AFFAIRS_BASE}/${month}-${year}.json`
 
@@ -333,6 +334,7 @@ function RecallGameParser() {
 
   async function handlePublishAllRecall() {
     setPublishStatus(null)
+    setPurgeStatus(null)
 
     if (!gameDateDMY) {
       setPublishStatus({ type: 'error', message: 'Please choose a date.' })
@@ -380,6 +382,25 @@ function RecallGameParser() {
       } else {
         setPublishStatus({ type: 'success', message: `Published all 5 files for ${gameDateDMY}.` })
         await loadRecallServerState()
+
+        try {
+          const purgeRes = await fetch(`${WORKER_URL}/purge-cdn`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ files: files.map((f) => f.key) }),
+          })
+          const purgeResult = await purgeRes.json()
+          if (purgeRes.ok && purgeResult.success) {
+            setPurgeStatus({ type: 'success', message: 'CDN cache purge succeeded.' })
+          } else {
+            setPurgeStatus({
+              type: 'error',
+              message: `CDN cache purge failed: ${purgeResult.error || `Request failed (${purgeRes.status})`}`,
+            })
+          }
+        } catch (err) {
+          setPurgeStatus({ type: 'error', message: `CDN cache purge failed: ${err.message}` })
+        }
       }
     } catch (err) {
       setPublishStatus({ type: 'error', message: `Publish error: ${err.message}` })
@@ -524,6 +545,12 @@ function RecallGameParser() {
             {publishStatus && (
               <div className={`alert ${publishStatus.type === 'success' ? 'alert-success' : 'alert-error'}`}>
                 {publishStatus.message}
+              </div>
+            )}
+
+            {purgeStatus && (
+              <div className={`alert ${purgeStatus.type === 'success' ? 'alert-success' : 'alert-error'}`}>
+                {purgeStatus.message}
               </div>
             )}
 
