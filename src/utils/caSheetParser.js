@@ -129,9 +129,15 @@ export function parseCaSheet(csvText, { version, hasHeader = true }) {
   const skippedSamples = []
 
   for (const row of dataRows) {
-    if (row.every((cell) => cell.trim() === '')) continue // fully blank row
-
     const rawDate = row[1] || ''
+    const titleEn = (row[2] || '').trim()
+
+    // An unused template row — no title and no date — isn't a data problem to
+    // report, just an empty row below the real entries (common when a serial
+    // number column is auto-filled/formula-dragged further down than the
+    // actual data, which defeats a naive "every cell is empty" blank check).
+    if (!titleEn && !rawDate.trim()) continue
+
     const normalizedDate = normalizeDate(rawDate)
     if (!normalizedDate) {
       skipped++
