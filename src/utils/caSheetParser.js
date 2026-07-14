@@ -12,12 +12,14 @@
 // id = Number(date-with-dashes-removed + idSuffix), matching
 // `splittedList[1].replace("-", "") + splittedList[0]).toLong()`.
 
-// export function buildSheetCsvUrl(sheetId, tabName) {
-//   return `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tabName)}`
-// }
+// Fetches the plain CSV export by gid (not the gviz/tq name-based endpoint —
+// gviz applies its own value-formatting heuristics to cells it detects as
+// dates, which was silently mangling some rows; /export?format=csv returns
+// the literal cell text as typed).
 export function buildSheetCsvUrl(sheetId, gid) {
   return `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`
 }
+
 // Minimal RFC4180-style CSV parser: handles quoted fields containing commas,
 // newlines, and escaped ("") double quotes, and CRLF/LF line endings — all of
 // which Google's gviz CSV export can produce for multi-line description text.

@@ -10,10 +10,6 @@ function todayISO() {
   return new Date().toISOString().split('T')[0]
 }
 
-function currentMonthName() {
-  return new Date().toLocaleString('en-US', { month: 'long' })
-}
-
 function dmyToISO(dmy) {
   const [d, m, y] = dmy.split('-')
   return `${y}-${m}-${d}`
@@ -25,7 +21,10 @@ function CAParser() {
   const [loadingCurrent, setLoadingCurrent] = useState(true)
   const [currentError, setCurrentError] = useState('')
 
-  const [sheetTabName, setSheetTabName] = useState(currentMonthName)
+  const [sheetTabs, setSheetTabs] = useState([])
+  const [sheetTabsLoading, setSheetTabsLoading] = useState(true)
+  const [sheetTabsError, setSheetTabsError] = useState('')
+  const [selectedGid, setSelectedGid] = useState('')
   const [sheetHasHeader, setSheetHasHeader] = useState(true)
   const [sheetVersion, setSheetVersion] = useState('')
   const [sheetLoading, setSheetLoading] = useState(false)
@@ -73,32 +72,56 @@ function CAParser() {
     loadCurrentState()
   }, [])
 
+  async function loadSheetTabs() {
+    setSheetTabsError('')
+    setSheetTabsLoading(true)
+    try {
+      const res = await fetch(`${WORKER_URL}/ca-sheet-tabs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sheetId: CA_SHEET_ID }),
+      })
+      const result = await res.json()
+      if (!res.ok) throw new Error(result.error || `Request failed (${res.status})`)
+      if (!Array.isArray(result.tabs) || result.tabs.length === 0) {
+        throw new Error('No tabs found in the sheet.')
+      }
+      setSheetTabs(result.tabs)
+      setSelectedGid(result.tabs[result.tabs.length - 1].gid) // default: last (most recent) tab
+    } catch (err) {
+      setSheetTabsError(err.message)
+    } finally {
+      setSheetTabsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadSheetTabs()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   async function handleFetchSheet() {
-    const tabName = sheetTabName.trim()
     setSheetError('')
     setSheetParsed(null)
 
-    if (!tabName) {
-      setSheetError('Enter a tab name (e.g. "July").')
+    if (!selectedGid) {
+      setSheetError('No tab selected.')
       return
     }
 
     setSheetLoading(true)
     try {
-      const url = buildSheetCsvUrl(CA_SHEET_ID, "1156533116")
-      console.log('Fetching sheet CSV from', url)
+      const url = buildSheetCsvUrl(CA_SHEET_ID, selectedGid)
       const res = await fetch(url, { cache: 'no-store' })
       if (!res.ok) {
         throw new Error(
-          `Failed to fetch tab "${tabName}" (${res.status}). Make sure the sheet is shared as ` +
-            '"Anyone with the link can view" and the tab name matches exactly.'
+          `Failed to fetch the selected tab (${res.status}). Make sure the sheet is shared as ` +
+            '"Anyone with the link can view".'
         )
       }
       const csvText = await res.text()
-      // console.log(csvText)
       const result = parseCaSheet(csvText, { version: Number(sheetVersion) || 0, hasHeader: sheetHasHeader })
       if (result.cas.length === 0) {
-        throw new Error('No valid rows found. Check the tab name and that dates are in dd-mm-yyyy format.')
+        throw new Error('No valid rows found. Check that dates are in dd-mm-yyyy format.')
       }
       setSheetParsed(result)
     } catch (err) {
@@ -110,8 +133,9 @@ function CAParser() {
 
   function handleDownloadSheetJson() {
     if (!sheetParsed) return
+    const tabName = sheetTabs.find((t) => t.gid === selectedGid)?.name || 'ca'
     const json = JSON.stringify({ cas: sheetParsed.cas, questions: sheetParsed.questions }, null, 2)
-    downloadBlob(json, `${sheetTabName.trim() || 'ca'}.json`, 'application/json')
+    downloadBlob(json, `${tabName}.json`, 'application/json')
   }
 
   async function handleLoadCaRoot() {
@@ -353,13 +377,22 @@ function CAParser() {
 
         <div className="form-grid">
           <label className="field">
-            <span>Tab name</span>
-            <input
-              type="text"
-              value={sheetTabName}
-              onChange={(e) => setSheetTabName(e.target.value)}
-              placeholder="e.g. July"
-            />
+            <span>Tab</span>
+            <select
+              value={selectedGid}
+              onChange={(e) => setSelectedGid(e.target.value)}
+              disabled={sheetTabsLoading || sheetTabs.length === 0}
+            >
+              {sheetTabs.map((t) => (
+                <option key={t.gid} value={t.gid}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+            <span className="field-hint">
+              {sheetTabsLoading && 'Loading sheet tabs…'}
+              {sheetTabsError && `Couldn't load tabs: ${sheetTabsError}`}
+            </span>
           </label>
           <label className="field">
             <span>Version (ver)</span>
@@ -389,7 +422,7 @@ function CAParser() {
             type="button"
             className="btn btn-primary"
             onClick={handleFetchSheet}
-            disabled={sheetLoading || caRootLoading}
+            disabled={sheetLoading || caRootLoading || sheetTabsLoading || !selectedGid}
           >
             {sheetLoading ? 'Fetching…' : 'Fetch & Parse'}
           </button>
