@@ -12,9 +12,11 @@ const HTML_BUILDERS = {
   word: buildWordHtml,
 }
 
+const ALLOWED_ORIGIN_DEFAULT = 'https://gowthamgsv32.github.io'
+
 function corsHeaders(env) {
   return {
-    'Access-Control-Allow-Origin': env.ALLOWED_ORIGIN,
+    'Access-Control-Allow-Origin': env.ALLOWED_ORIGIN || ALLOWED_ORIGIN_DEFAULT,
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
   }
@@ -292,6 +294,37 @@ async function handleGenerateCaQuestions(request, env) {
   return json(env, { data })
 }
 
+// CA Parser: lists a Google Sheet's tabs (name + gid) via the Sheets API, so
+// the frontend can offer a dropdown instead of a hand-typed tab name/gid.
+// Requires only an API key (no OAuth) since the sheet is shared publicly —
+// the key just identifies the calling project for quota purposes.
+async function handleGetSheetTabs(request, env) {
+  const { sheetId } = await request.json()
+
+  if (!sheetId) {
+    return json(env, { error: 'Missing sheetId.' }, 400)
+  }
+
+  const apiKey = env.GOOGLE_SHEETS_API_KEY
+  if (!apiKey) {
+    return json(env, { error: 'No Google Sheets API key configured (GOOGLE_SHEETS_API_KEY).' }, 500)
+  }
+
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?key=${apiKey}&fields=sheets.properties`
+  const res = await fetch(url)
+  const body = await res.json()
+
+  if (!res.ok) {
+    return json(env, { error: body.error?.message || `Sheets API request failed (${res.status})` }, res.status)
+  }
+
+  const tabs = (body.sheets || [])
+    .map((s) => ({ name: s.properties.title, gid: String(s.properties.sheetId), index: s.properties.index }))
+    .sort((a, b) => a.index - b.index)
+
+  return json(env, { tabs })
+}
+
 async function handleUpload(request, env) {
   const { date, json: jsonPayload } = await request.json()
 
@@ -369,6 +402,9 @@ export default {
       }
       if (request.method === 'POST' && url.pathname === '/generate-ca-questions') {
         return await handleGenerateCaQuestions(request, env)
+      }
+      if (request.method === 'POST' && url.pathname === '/ca-sheet-tabs') {
+        return await handleGetSheetTabs(request, env)
       }
       if (request.method === 'POST' && url.pathname === '/upload') {
         return await handleUpload(request, env)
