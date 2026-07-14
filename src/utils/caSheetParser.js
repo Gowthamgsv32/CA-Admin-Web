@@ -100,27 +100,49 @@ export function parseCaRow(fields, version) {
   }
 }
 
-const DATE_PATTERN = /^\d{2}-\d{2}-\d{4}$/
+// Accepts 1-2 digit day/month and "-", "/", or "." as the separator — Google
+// Sheets silently drops leading zeros (and may swap in "/") when it
+// auto-detects a hand-typed date and reformats the cell.
+const DATE_PATTERN = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/
 
-// Returns { cas, questions: [], skipped } — skipped counts rows dropped for
-// having a missing/malformed date (so they can't be turned into a valid id).
+// Normalizes a loosely-formatted dd-mm-yyyy date back to a strict
+// zero-padded "dd-mm-yyyy", or returns null if it doesn't look like a date
+// at all. The id formula needs a fixed 8-digit date to stay unique, so
+// padding isn't optional even though the value is already human-readable.
+function normalizeDate(raw) {
+  const match = DATE_PATTERN.exec(raw.trim())
+  if (!match) return null
+  const [, day, month, year] = match
+  return `${day.padStart(2, '0')}-${month.padStart(2, '0')}-${year}`
+}
+
+// Returns { cas, questions: [], skipped, skippedSamples } — skipped counts
+// rows dropped for having a missing/malformed date (so they can't be turned
+// into a valid id); skippedSamples holds a few of the raw values for
+// diagnosing what the sheet actually contains (capped at 10).
 export function parseCaSheet(csvText, { version, hasHeader = true }) {
   const rows = parseCsv(csvText)
   const dataRows = hasHeader ? rows.slice(1) : rows
 
   const cas = []
   let skipped = 0
+  const skippedSamples = []
 
   for (const row of dataRows) {
     if (row.every((cell) => cell.trim() === '')) continue // fully blank row
 
-    const date = (row[1] || '').trim()
-    if (!DATE_PATTERN.test(date)) {
+    const rawDate = row[1] || ''
+    const normalizedDate = normalizeDate(rawDate)
+    if (!normalizedDate) {
       skipped++
+      if (skippedSamples.length < 10) skippedSamples.push(rawDate.trim() || '(empty)')
       continue
     }
-    cas.push(parseCaRow(row, version))
+
+    const normalizedRow = [...row]
+    normalizedRow[1] = normalizedDate
+    cas.push(parseCaRow(normalizedRow, version))
   }
 
-  return { cas, questions: [], skipped }
+  return { cas, questions: [], skipped, skippedSamples }
 }
