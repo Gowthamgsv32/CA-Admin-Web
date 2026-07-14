@@ -48,6 +48,7 @@ function CAParser() {
   const [publishingCa, setPublishingCa] = useState(false)
   const [publishCaError, setPublishCaError] = useState('')
   const [publishCaResults, setPublishCaResults] = useState(null)
+  const [purgeStatus, setPurgeStatus] = useState(null)
 
   async function loadCurrentState() {
     setLoadingCurrent(true)
@@ -296,6 +297,7 @@ function CAParser() {
   async function handlePublishCaFiles() {
     setPublishCaError('')
     setPublishCaResults(null)
+    setPurgeStatus(null)
 
     if (!rootPreview || !dayJsonPreview || !monthJsonPreview || !genDate || !genMonthKey) {
       setPublishCaError('Generate the files first.')
@@ -337,6 +339,22 @@ function CAParser() {
         setCaRoot(rootPreview.root)
         setRemoteMonthQuestions((prev) => [...(prev || []), ...generatedQuestions])
         setGeneratedQuestions([])
+
+        try {
+          const purgeRes = await fetch(`${WORKER_URL}/purge-cdn`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ files: files.map((f) => f.key) }),
+          })
+          const purgeResult = await purgeRes.json()
+          if (purgeRes.ok && purgeResult.success) {
+            setPurgeStatus({ success: true })
+          } else {
+            setPurgeStatus({ success: false, error: purgeResult.error || `Request failed (${purgeRes.status})` })
+          }
+        } catch (err) {
+          setPurgeStatus({ success: false, error: err.message })
+        }
       }
     } catch (err) {
       setPublishCaError(`Publish failed: ${err.message}`)
@@ -606,6 +624,11 @@ function CAParser() {
                   {r.key} — {r.success ? 'uploaded' : r.error}
                 </div>
               ))}
+              {purgeStatus && (
+                <div className={`alert ${purgeStatus.success ? 'alert-success' : 'alert-error'}`}>
+                  CDN cache purge — {purgeStatus.success ? 'succeeded' : purgeStatus.error}
+                </div>
+              )}
             </div>
           )}
 

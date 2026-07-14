@@ -1,6 +1,7 @@
 import { PROMPTS } from './prompts.js'
 import { buildResultHtml, buildGrammarHtml, buildPhraseHtml, buildWordHtml } from './html.js'
 import { putObjectToSpaces } from './spaces.js'
+import { purgeCdnCache } from './doCdn.js'
 import { buildRecallGamePrompt } from './recallGamePrompts.js'
 import { buildTnpscPrompt } from './tnpscPrompts.js'
 import { buildCaQuestionPrompt } from './caQuestionPrompts.js'
@@ -382,6 +383,27 @@ async function handlePublish(request, env) {
   return json(env, { results })
 }
 
+// Purges specific object keys (or ["*"] for everything) from the DO Spaces
+// CDN edge cache — needed after a publish, since the CDN otherwise keeps
+// serving whatever it cached until each file's TTL naturally expires.
+async function handlePurgeCdn(request, env) {
+  const { files } = await request.json()
+
+  if (!env.DO_API_TOKEN) {
+    return json(env, { error: 'No DigitalOcean API token configured (DO_API_TOKEN).' }, 500)
+  }
+  if (!Array.isArray(files) || files.length === 0) {
+    return json(env, { error: 'Missing files to purge.' }, 400)
+  }
+
+  try {
+    await purgeCdnCache(env.DO_API_TOKEN, files)
+    return json(env, { success: true, files })
+  } catch (err) {
+    return json(env, { success: false, error: err.message }, 502)
+  }
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') {
@@ -411,6 +433,9 @@ export default {
       }
       if (request.method === 'POST' && url.pathname === '/publish') {
         return await handlePublish(request, env)
+      }
+      if (request.method === 'POST' && url.pathname === '/purge-cdn') {
+        return await handlePurgeCdn(request, env)
       }
       return json(env, { error: 'Not found' }, 404)
     } catch (err) {
