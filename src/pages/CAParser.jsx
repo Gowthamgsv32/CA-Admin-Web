@@ -413,6 +413,13 @@ function CAParser() {
               <div className="alert alert-error">
                 Skipped {sheetParsed.skipped} row{sheetParsed.skipped === 1 ? '' : 's'} with a missing or
                 malformed date.
+                {sheetParsed.skippedSamples?.length > 0 && (
+                  <>
+                    {' '}
+                    Examples: {sheetParsed.skippedSamples.map((s) => `"${s}"`).join(', ')}
+                    {sheetParsed.skipped > sheetParsed.skippedSamples.length ? ', …' : ''}
+                  </>
+                )}
               </div>
             </div>
           )}
