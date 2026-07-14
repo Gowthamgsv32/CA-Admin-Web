@@ -118,17 +118,19 @@ function normalizeDate(raw) {
 
 // Returns { cas, questions: [], skipped, skippedSamples } — skipped counts
 // rows dropped for having a missing/malformed date (so they can't be turned
-// into a valid id); skippedSamples holds a few of the raw values for
-// diagnosing what the sheet actually contains (capped at 10).
+// into a valid id); skippedSamples holds a few { row, title, rawDate }
+// entries (capped at 10) identifying exactly which sheet row and title had
+// the problem, so it can be found and fixed directly in the sheet.
 export function parseCaSheet(csvText, { version, hasHeader = true }) {
   const rows = parseCsv(csvText)
   const dataRows = hasHeader ? rows.slice(1) : rows
+  const headerOffset = hasHeader ? 2 : 1 // first data row's 1-based sheet row number
 
   const cas = []
   let skipped = 0
   const skippedSamples = []
 
-  for (const row of dataRows) {
+  dataRows.forEach((row, i) => {
     const rawDate = row[1] || ''
     const titleEn = (row[2] || '').trim()
 
@@ -136,19 +138,25 @@ export function parseCaSheet(csvText, { version, hasHeader = true }) {
     // report, just an empty row below the real entries (common when a serial
     // number column is auto-filled/formula-dragged further down than the
     // actual data, which defeats a naive "every cell is empty" blank check).
-    if (!titleEn && !rawDate.trim()) continue
+    if (!titleEn && !rawDate.trim()) return
 
     const normalizedDate = normalizeDate(rawDate)
     if (!normalizedDate) {
       skipped++
-      if (skippedSamples.length < 10) skippedSamples.push(rawDate.trim() || '(empty)')
-      continue
+      if (skippedSamples.length < 10) {
+        skippedSamples.push({
+          row: i + headerOffset,
+          title: titleEn || '(no title)',
+          rawDate: rawDate.trim() || '(empty)',
+        })
+      }
+      return
     }
 
     const normalizedRow = [...row]
     normalizedRow[1] = normalizedDate
     cas.push(parseCaRow(normalizedRow, version))
-  }
+  })
 
   return { cas, questions: [], skipped, skippedSamples }
 }
