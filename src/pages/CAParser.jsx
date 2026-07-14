@@ -85,7 +85,8 @@ function CAParser() {
 
     setSheetLoading(true)
     try {
-      const url = buildSheetCsvUrl(CA_SHEET_ID, tabName)
+      const url = buildSheetCsvUrl(CA_SHEET_ID, "1156533116")
+      console.log('Fetching sheet CSV from', url)
       const res = await fetch(url, { cache: 'no-store' })
       if (!res.ok) {
         throw new Error(
@@ -94,6 +95,7 @@ function CAParser() {
         )
       }
       const csvText = await res.text()
+      // console.log(csvText)
       const result = parseCaSheet(csvText, { version: Number(sheetVersion) || 0, hasHeader: sheetHasHeader })
       if (result.cas.length === 0) {
         throw new Error('No valid rows found. Check the tab name and that dates are in dd-mm-yyyy format.')
