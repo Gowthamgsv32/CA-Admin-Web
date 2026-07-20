@@ -1383,6 +1383,90 @@ Rules:
 - Return ONLY the JSON array, nothing else.`
 }
 
+// ---- caQbPrompts.js ----
+// Turns one Current Affairs article into a full "question bank" batch — at
+// least 2 questions covering all 4 exam types (MCQ, STATEMENT, MATCH,
+// FILL_BLANK), each in en/hi/ta. Ported near-verbatim from the prompt the
+// admin already designed and hand-tested; only the topic/text interpolation
+// at the end was added. "qid" is deliberately absent from the schema — it's
+// assigned by the caller from its own running sequence, matching the
+// "never trust the model with our own numbering" convention used elsewhere.
+function buildCaQbPrompt({ topic, text }) {
+  return `You are an expert Indian competitive exam question setter
+(UPSC, TNPSC, SSC, Banking level).
+
+The input text is trusted editorial current affairs content.
+Do NOT mention sources or external references (PIB, The Hindu, etc.)
+Do NOT say "according to reports".
+
+TASK:
+From the given current affairs text, generate MULTIPLE exam-quality questions.
+
+MANDATORY REQUIREMENTS:
+- Generate AT LEAST 2 questions
+- Questions MUST include ALL FOUR TYPES:
+  1) MCQ (normal multiple-choice question with remembrance tip)
+  2) STATEMENT type (2–3 statements with options like "1 and 2 only")
+  3) MATCH type (match-the-following, NO drag-and-drop, exam-style options)
+  4) FILL_BLANK type (year, place, organisation, index, country, capital etc.)
+
+CONTENT RULES:
+- Include BOTH:
+  • Dynamic current affairs questions (from the news)
+  • Static current affairs questions (background facts related to the topic)
+- Assign difficulty for EACH question: Easy / Medium / Hard
+- All facts must be standard, exam-accepted facts
+- Do NOT invent obscure or risky facts
+- Static facts should be safe (location, year, programme, authority)
+- Provide a short, exam-friendly remembrance tip for EACH question
+
+LANGUAGE RULES:
+- Generate content in THREE languages:
+  • English (en)
+  • Hindi (hi)
+  • Tamil (ta)
+
+OUTPUT RULES:
+- Output STRICT JSON ARRAY only
+- Do NOT include any explanation outside JSON
+- Do NOT add markdown, headings, or comments
+- Do NOT include a "qid" field in any object — it is added separately by the caller
+
+EACH QUESTION OBJECT MUST FOLLOW THIS EXACT STRUCTURE:
+
+{
+  "type": "MCQ | STATEMENT | MATCH | FILL_BLANK",
+  "difficulty": "Easy | Medium | Hard",
+  "question": {
+    "en": "...",
+    "hi": "...",
+    "ta": "..."
+  },
+  "options": {
+    "en": { "A": "...", "B": "...", "C": "...", "D": "..." },
+    "hi": { "A": "...", "B": "...", "C": "...", "D": "..." },
+    "ta": { "A": "...", "B": "...", "C": "...", "D": "..." }
+  },
+  "answer": "A",
+  "explanation": {
+    "en": "...",
+    "hi": "...",
+    "ta": "..."
+  },
+  "tip": {
+    "en": "...",
+    "hi": "...",
+    "ta": "..."
+  }
+}
+
+CURRENT AFFAIRS TEXT:
+${text}
+
+PRIMARY TOPIC:
+${topic}`
+}
+
 // ---- index.js ----
 const HTML_BUILDERS = {
   spoken: buildResultHtml,
@@ -1704,6 +1788,64 @@ async function handleGetSheetTabs(request, env) {
   return json(env, { tabs })
 }
 
+const CA_QB_GENERATION_CONFIG = {
+  temperature: 0.4,
+  maxOutputTokens: 8192,
+  thinkingConfig: { thinkingBudget: 0 },
+}
+
+// CA QB Parser: turns one article's { topic, text } into a full question
+// bank batch (>= 2 questions, all 4 exam types). qid is assigned by the
+// frontend, so this just returns the parsed JSON array.
+async function handleGenerateCaQb(request, env) {
+  const { topic, text } = await request.json()
+
+  if (!topic || !text) {
+    return json(env, { error: 'Missing topic or text.' }, 400)
+  }
+
+  const apiKeys = parseApiKeys(env.GEMINI_API_KEY)
+  if (apiKeys.length === 0) {
+    return json(env, { error: 'No Gemini API key configured.' }, 500)
+  }
+
+  let geminiRes
+  try {
+    geminiRes = await callGeminiWithFallback(buildCaQbPrompt({ topic, text }), apiKeys, CA_QB_GENERATION_CONFIG)
+  } catch (err) {
+    return json(env, { error: `Gemini request failed on every API key: ${err.message}` }, 503)
+  }
+
+  const geminiBody = await geminiRes.json()
+  if (geminiBody.error) {
+    return json(env, { error: geminiBody.error.message }, 502)
+  }
+
+  const finishReason = geminiBody.candidates?.[0]?.finishReason
+  let rawText = geminiBody.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+  rawText = rawText.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim()
+
+  let data
+  try {
+    data = JSON.parse(rawText)
+  } catch {
+    if (finishReason === 'MAX_TOKENS') {
+      return json(env, { error: 'Gemini response was cut off (ran out of output tokens) before finishing the JSON. Try again.' }, 502)
+    }
+    return json(env, { error: `Failed to parse AI response: ${rawText}` }, 502)
+  }
+
+  if (!Array.isArray(data) || data.length < 2) {
+    return json(
+      env,
+      { error: `Expected at least 2 questions, got ${Array.isArray(data) ? data.length : 'an invalid response'}.` },
+      502
+    )
+  }
+
+  return json(env, { data })
+}
+
 async function handleUpload(request, env) {
   const { date, json: jsonPayload } = await request.json()
 
@@ -1802,6 +1944,9 @@ export default {
       }
       if (request.method === 'POST' && url.pathname === '/generate-ca-questions') {
         return await handleGenerateCaQuestions(request, env)
+      }
+      if (request.method === 'POST' && url.pathname === '/generate-ca-qb') {
+        return await handleGenerateCaQb(request, env)
       }
       if (request.method === 'POST' && url.pathname === '/ca-sheet-tabs') {
         return await handleGetSheetTabs(request, env)

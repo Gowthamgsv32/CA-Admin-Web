@@ -6,6 +6,7 @@ import DailyBytesParser from './pages/DailyBytesParser'
 import StaticParser from './pages/StaticParser'
 import CAParser from './pages/CAParser'
 import RecallGameParser from './pages/RecallGameParser'
+import CaQbParser from './pages/CaQbParser'
 import './App.css'
 
 // Code-split: pdfjs-dist is heavy and only needed on this one page, so it
@@ -21,6 +22,7 @@ function App() {
         <Route path="static-parser" element={<StaticParser />} />
         <Route path="ca-parser" element={<CAParser />} />
         <Route path="recall-game-parser" element={<RecallGameParser />} />
+        <Route path="ca-qb-parser" element={<CaQbParser />} />
         <Route
           path="tnpsc-parser"
           element={
