@@ -1,10 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CA_ROOT_URL, CA_SHEET_ID, CURRENT_AFFAIRS_BASE, ROOT_URL, VER_FILE_URL, WORKER_URL } from '../config/api'
+import {
+  CA_GAME_BASE,
+  CA_GAME_ROOT_URL,
+  CA_ROOT_URL,
+  CA_SHEET_ID,
+  CURRENT_AFFAIRS_BASE,
+  ROOT_URL,
+  VER_FILE_URL,
+  WORKER_URL,
+} from '../config/api'
 import { downloadBlob } from '../utils/download'
-import { createZip, bytesToBase64 } from '../utils/zip'
-import { isoToDMY, monthKeyFromDMY } from '../utils/dailyBytesPublish'
+import { createZip, bytesToBase64, extractFirstFileFromZip } from '../utils/zip'
+import { isoToDMY, mergeMonthJson, monthKeyFromDMY } from '../utils/dailyBytesPublish'
 import { buildSheetCsvUrl, parseCaSheet } from '../utils/caSheetParser'
-import { buildNextCaRoot, buildMonthZipBytes } from '../utils/caPublish'
+import { buildNextCaGameRoot, buildNextCaRoot, buildMonthZipBytes } from '../utils/caPublish'
 
 function todayISO() {
   return new Date().toISOString().split('T')[0]
@@ -49,6 +58,19 @@ function CAParser() {
   const [publishCaError, setPublishCaError] = useState('')
   const [publishCaResults, setPublishCaResults] = useState(null)
   const [purgeStatus, setPurgeStatus] = useState(null)
+
+  const [caGameRoot, setCaGameRoot] = useState(null)
+  const [caGameRootLoading, setCaGameRootLoading] = useState(false)
+  const [caGameRootError, setCaGameRootError] = useState('')
+
+  const [caGameMonthJson, setCaGameMonthJson] = useState(null)
+  const [caGameMonthLoading, setCaGameMonthLoading] = useState(false)
+  const [caGameMonthError, setCaGameMonthError] = useState('')
+
+  const [publishingCaGame, setPublishingCaGame] = useState(false)
+  const [publishCaGameError, setPublishCaGameError] = useState('')
+  const [publishCaGameResults, setPublishCaGameResults] = useState(null)
+  const [purgeCaGameStatus, setPurgeCaGameStatus] = useState(null)
 
   async function loadCurrentState() {
     setLoadingCurrent(true)
@@ -209,6 +231,48 @@ function CAParser() {
       .finally(() => setRemoteMonthLoading(false))
   }, [genMonthKey])
 
+  async function handleLoadCaGameRoot() {
+    setCaGameRootError('')
+    setCaGameRootLoading(true)
+    try {
+      const res = await fetch(CA_GAME_ROOT_URL, { cache: 'no-store' })
+      if (!res.ok) throw new Error(`Failed to load root.json (${res.status})`)
+      setCaGameRoot(await res.json())
+    } catch (err) {
+      setCaGameRootError(err.message)
+    } finally {
+      setCaGameRootLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    handleLoadCaGameRoot()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Cagame's month file is a zip, not raw JSON — download it, pull the JSON
+  // back out, and use that as the base to merge this day's cas/questions into.
+  useEffect(() => {
+    if (!genMonthKey) return
+    setCaGameMonthError('')
+    setCaGameMonthLoading(true)
+    fetch(`${CA_GAME_BASE}/${genMonthKey}.zip`, { cache: 'no-store' })
+      .then(async (res) => {
+        if (!res.ok) {
+          if (res.status === 404 || res.status === 403) return { cas: [], questions: [] }
+          throw new Error(`Failed to load ${genMonthKey}.zip (${res.status})`)
+        }
+        const buffer = new Uint8Array(await res.arrayBuffer())
+        const jsonBytes = extractFirstFileFromZip(buffer)
+        return JSON.parse(new TextDecoder().decode(jsonBytes))
+      })
+      .then((data) => setCaGameMonthJson({ cas: data.cas || [], questions: data.questions || [] }))
+      .catch((err) => {
+        setCaGameMonthError(err.message)
+        setCaGameMonthJson({ cas: [], questions: [] })
+      })
+      .finally(() => setCaGameMonthLoading(false))
+  }, [genMonthKey])
+
   async function handleGenerateQuestions() {
     setQuestionsError('')
 
@@ -266,6 +330,25 @@ function CAParser() {
       baseUrl: CURRENT_AFFAIRS_BASE,
     })
   }, [caRoot, genDate, monthJsonPreview])
+
+  // Cagame accumulates from its own separate month history (not
+  // CurrentAffairs's), so this merges the day's cas/questions into whatever
+  // was extracted from the existing Cagame month zip above.
+  const caGameMergedMonthJson = useMemo(() => {
+    if (!caGameMonthJson || !dayJsonPreview) return null
+    return mergeMonthJson({ currentMonthJson: caGameMonthJson, dayJson: dayJsonPreview })
+  }, [caGameMonthJson, dayJsonPreview])
+
+  const caGameRootPreview = useMemo(() => {
+    if (!caGameRoot || !genDate || !caGameMergedMonthJson) return null
+    return buildNextCaGameRoot({
+      currentRoot: caGameRoot,
+      selectedDateDMY: genDate,
+      monthCasCount: caGameMergedMonthJson.cas.length,
+      monthQuestionsCount: caGameMergedMonthJson.questions.length,
+      baseUrl: CA_GAME_BASE,
+    })
+  }, [caGameRoot, genDate, caGameMergedMonthJson])
 
   function handleDownloadDayJson() {
     if (!dayJsonPreview || !genDate) return
@@ -360,6 +443,89 @@ function CAParser() {
       setPublishCaError(`Publish failed: ${err.message}`)
     } finally {
       setPublishingCa(false)
+    }
+  }
+
+  function handleDownloadCaGameZip() {
+    if (!caGameRootPreview || !dayJsonPreview || !caGameMergedMonthJson || !genDate || !genMonthKey) return
+    const dayZipBytes = createZip([
+      { name: `${genDate}.json`, data: new TextEncoder().encode(JSON.stringify(dayJsonPreview)) },
+    ])
+    const monthZipBytes = buildMonthZipBytes(caGameMergedMonthJson, genMonthKey)
+    const files = [
+      { name: 'root.json', data: new TextEncoder().encode(JSON.stringify(caGameRootPreview.root, null, 2)) },
+      { name: `${genDate}.zip`, data: dayZipBytes },
+      { name: `${genMonthKey}.zip`, data: monthZipBytes },
+    ]
+    downloadBlob(createZip(files), `Cagame-${genDate}.zip`, 'application/zip')
+  }
+
+  async function handlePublishCaGameFiles() {
+    setPublishCaGameError('')
+    setPublishCaGameResults(null)
+    setPurgeCaGameStatus(null)
+
+    if (!caGameRootPreview || !dayJsonPreview || !caGameMergedMonthJson || !genDate || !genMonthKey) {
+      setPublishCaGameError('Generate the files first.')
+      return
+    }
+
+    setPublishingCaGame(true)
+    try {
+      const dayZipBytes = createZip([
+        { name: `${genDate}.json`, data: new TextEncoder().encode(JSON.stringify(dayJsonPreview)) },
+      ])
+      const monthZipBytes = buildMonthZipBytes(caGameMergedMonthJson, genMonthKey)
+
+      const files = [
+        { key: 'Cagame/root.json', contentType: 'application/json', body: JSON.stringify(caGameRootPreview.root) },
+        {
+          key: `Cagame/${genDate}.zip`,
+          contentType: 'application/zip',
+          bodyBase64: bytesToBase64(dayZipBytes),
+        },
+        {
+          key: `Cagame/${genMonthKey}.zip`,
+          contentType: 'application/zip',
+          bodyBase64: bytesToBase64(monthZipBytes),
+        },
+      ]
+
+      const res = await fetch(`${WORKER_URL}/publish`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files }),
+      })
+      const result = await res.json()
+      setPublishCaGameResults(result.results)
+
+      if (result.results?.every((r) => r.success)) {
+        setCaGameRoot(caGameRootPreview.root)
+        setCaGameMonthJson(caGameMergedMonthJson)
+
+        try {
+          const purgeRes = await fetch(`${WORKER_URL}/purge-cdn`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ files: files.map((f) => f.key) }),
+          })
+          const purgeResult = await purgeRes.json()
+          if (purgeRes.ok && purgeResult.success) {
+            setPurgeCaGameStatus({ success: true })
+          } else {
+            setPurgeCaGameStatus({
+              success: false,
+              error: purgeResult.error || `Request failed (${purgeRes.status})`,
+            })
+          }
+        } catch (err) {
+          setPurgeCaGameStatus({ success: false, error: err.message })
+        }
+      }
+    } catch (err) {
+      setPublishCaGameError(`Publish failed: ${err.message}`)
+    } finally {
+      setPublishingCaGame(false)
     }
   }
 
@@ -672,6 +838,94 @@ function CAParser() {
                 }.`}
           </p>
           <pre className="json-preview">{JSON.stringify(rootPreview.root, null, 2)}</pre>
+        </section>
+      )}
+
+      {caGameRootPreview && dayJsonPreview && caGameMergedMonthJson && (
+        <section className="result-card">
+          <div className="result-toolbar">
+            <h3>Cagame files — {genDate}</h3>
+            <div className="result-actions">
+              <button type="button" className="btn btn-ghost" onClick={handleDownloadCaGameZip}>
+                Download All (ZIP)
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handlePublishCaGameFiles}
+                disabled={publishingCaGame}
+              >
+                {publishingCaGame ? 'Publishing…' : 'Publish to Spaces'}
+              </button>
+            </div>
+          </div>
+
+          <p className="field-hint" style={{ padding: '0 20px' }}>
+            Cagame keeps its own independent root.json and month history at {CA_GAME_BASE}/, separate from
+            CurrentAffairs. Only zipped files are uploaded — {genDate}.zip, {genMonthKey}.zip, and root.json.
+          </p>
+
+          {caGameRootLoading && (
+            <p className="field-hint" style={{ padding: '0 20px' }}>
+              Loading Cagame root.json…
+            </p>
+          )}
+          {caGameRootError && (
+            <div className="alert alert-error" style={{ margin: '0 20px' }}>
+              {caGameRootError}
+            </div>
+          )}
+          {caGameMonthLoading && (
+            <p className="field-hint" style={{ padding: '0 20px' }}>
+              Loading existing {genMonthKey}.zip…
+            </p>
+          )}
+          {caGameMonthError && (
+            <p className="field-hint" style={{ padding: '0 20px' }}>
+              Couldn't load existing {genMonthKey}.zip ({caGameMonthError}) — treating as a new month.
+            </p>
+          )}
+
+          {publishCaGameError && (
+            <div className="alert alert-error" style={{ margin: '16px 20px 0' }}>
+              {publishCaGameError}
+            </div>
+          )}
+
+          {publishCaGameResults && (
+            <div style={{ padding: '16px 20px 0', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {publishCaGameResults.map((r) => (
+                <div key={r.key} className={`alert ${r.success ? 'alert-success' : 'alert-error'}`}>
+                  {r.key} — {r.success ? 'uploaded' : r.error}
+                </div>
+              ))}
+              {purgeCaGameStatus && (
+                <div className={`alert ${purgeCaGameStatus.success ? 'alert-success' : 'alert-error'}`}>
+                  CDN cache purge — {purgeCaGameStatus.success ? 'succeeded' : purgeCaGameStatus.error}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="result-toolbar">
+            <h3>Month JSON — {genMonthKey}.zip</h3>
+            <span className="field-hint">
+              {caGameMergedMonthJson.cas.length} cas · {caGameMergedMonthJson.questions.length} questions
+            </span>
+          </div>
+          <pre className="json-preview">{JSON.stringify(caGameMergedMonthJson, null, 2)}</pre>
+
+          <div className="result-toolbar">
+            <h3>Root JSON{caGameRootPreview.isNewMonth ? ' — new month entry' : ''}</h3>
+          </div>
+          <p className="field-hint" style={{ padding: '0 20px' }}>
+            {caGameRootPreview.isNewMonth
+              ? `Will create a new month entry: "${caGameRootPreview.root.av_mos[caGameRootPreview.monthEntryIndex].title}".`
+              : `Will update "${caGameRootPreview.root.av_mos[caGameRootPreview.monthEntryIndex].title}" to ${
+                  caGameRootPreview.root.av_mos[caGameRootPreview.monthEntryIndex].desc
+                }.`}
+          </p>
+          <pre className="json-preview">{JSON.stringify(caGameRootPreview.root, null, 2)}</pre>
         </section>
       )}
     </div>

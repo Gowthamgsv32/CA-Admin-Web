@@ -53,6 +53,20 @@ export function buildNextCaRoot({ currentRoot, selectedDateDMY, monthCasCount, m
   return { root: nextRoot, monthEntryIndex: 0, isNewMonth: true }
 }
 
+// Cagame maintains its own independent root.json/month history at a
+// separate base path, and only ever uploads zipped day/month files (no raw
+// .json) — so unlike CurrentAffairs, its ca_url and av_mos[].url must point
+// at the .zip variants.
+export function buildNextCaGameRoot({ currentRoot, selectedDateDMY, monthCasCount, monthQuestionsCount, baseUrl }) {
+  const result = buildNextCaRoot({ currentRoot, selectedDateDMY, monthCasCount, monthQuestionsCount, baseUrl })
+  const root = { ...result.root, ca_url: `${baseUrl}/${selectedDateDMY}.zip` }
+  const avMos = [...root.av_mos]
+  const entry = avMos[result.monthEntryIndex]
+  avMos[result.monthEntryIndex] = { ...entry, url: entry.zip_url }
+  root.av_mos = avMos
+  return { ...result, root }
+}
+
 // Packages the month json into a single-entry zip — the format both the
 // "Download All" bundle and the Spaces upload use for `{monthKey}.zip`,
 // matching root.json av_mos[i].zip_url.

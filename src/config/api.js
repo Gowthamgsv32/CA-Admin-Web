@@ -19,6 +19,10 @@ export const RECALL_GAME_ROOT_URL = `${RECALL_GAME_BASE}/recall-root.json`
 
 export const RECALL_GAME_USED_ARTICLES_URL = `${RECALL_GAME_BASE}/used-articles.json`
 
+export const CA_GAME_BASE = 'https://healthappobjects.ams3.cdn.digitaloceanspaces.com/Cagame'
+
+export const CA_GAME_ROOT_URL = `${CA_GAME_BASE}/root.json`
+
 // Current Affairs content sheet — one tab per month (e.g. "July"), maintained
 // by hand. Must be shared as "Anyone with the link can view" for the gviz
 // CSV export below to work.
