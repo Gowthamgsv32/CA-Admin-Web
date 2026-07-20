@@ -112,6 +112,27 @@ export function createZip(files) {
   return result
 }
 
+// Reads the first entry out of a zip this app produced (STORE method only —
+// no DEFLATE support needed since createZip() never compresses). Used to
+// pull the JSON back out of a previously-published month .zip before
+// merging in a new day's content.
+export function extractFirstFileFromZip(bytes) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const signature = view.getUint32(0, true)
+  if (signature !== 0x04034b50) {
+    throw new Error('Not a valid zip file (missing local file header).')
+  }
+  const method = view.getUint16(8, true)
+  if (method !== 0) {
+    throw new Error(`Unsupported zip compression method (${method}); expected STORE (0).`)
+  }
+  const compressedSize = view.getUint32(18, true)
+  const nameLength = view.getUint16(26, true)
+  const extraLength = view.getUint16(28, true)
+  const dataStart = 30 + nameLength + extraLength
+  return bytes.subarray(dataStart, dataStart + compressedSize)
+}
+
 export function bytesToBase64(bytes) {
   let binary = ''
   const chunkSize = 0x8000
