@@ -6,6 +6,7 @@ import { buildRecallGamePrompt } from './recallGamePrompts.js'
 import { buildTnpscPrompt } from './tnpscPrompts.js'
 import { buildCaQuestionPrompt } from './caQuestionPrompts.js'
 import { buildCaQbPrompt } from './caQbPrompts.js'
+import { normalizeAndValidateCaQb } from './caQbValidate.js'
 
 const HTML_BUILDERS = {
   spoken: buildResultHtml,
@@ -382,7 +383,12 @@ async function handleGenerateCaQb(request, env) {
     )
   }
 
-  return json(env, { data })
+  const { data: normalized, errors } = normalizeAndValidateCaQb(data)
+  if (errors.length > 0) {
+    return json(env, { error: `AI response failed structure validation:\n${errors.join('\n')}` }, 502)
+  }
+
+  return json(env, { data: normalized })
 }
 
 async function handleUpload(request, env) {
