@@ -188,7 +188,11 @@ function CaQbParser() {
           </div>
 
           {generating && <p className="field-hint">{generateProgress}</p>}
-          {generateError && <div className="alert alert-error">{generateError}</div>}
+          {generateError && (
+            <div className="alert alert-error" style={{ whiteSpace: 'pre-wrap' }}>
+              {generateError}
+            </div>
+          )}
 
           <div className="form-actions">
             <button type="button" className="btn btn-primary" onClick={handleGenerateQb} disabled={generating}>

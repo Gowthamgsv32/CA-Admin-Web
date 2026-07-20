@@ -1467,6 +1467,86 @@ PRIMARY TOPIC:
 ${topic}`
 }
 
+// ---- caQbValidate.js ----
+const CA_QB_REQUIRED_LANGS = ['en', 'hi', 'ta']
+const CA_QB_OPTION_LETTERS = ['A', 'B', 'C', 'D']
+const CA_QB_VALID_TYPES = ['MCQ', 'STATEMENT', 'MATCH', 'FILL_BLANK']
+const CA_QB_VALID_DIFFICULTIES = ['Easy', 'Medium', 'Hard']
+const CA_QB_SIBLING_FIELDS = ['options', 'answer', 'explanation', 'tip', 'type', 'difficulty']
+
+function isLangTextMap(value) {
+  return (
+    !!value &&
+    typeof value === 'object' &&
+    CA_QB_REQUIRED_LANGS.every((lang) => typeof value[lang] === 'string' && value[lang].trim().length > 0)
+  )
+}
+
+function isOptionsMap(value) {
+  return (
+    !!value &&
+    typeof value === 'object' &&
+    CA_QB_REQUIRED_LANGS.every(
+      (lang) =>
+        value[lang] &&
+        typeof value[lang] === 'object' &&
+        CA_QB_OPTION_LETTERS.every((letter) => typeof value[lang][letter] === 'string' && value[lang][letter].trim().length > 0)
+    )
+  )
+}
+
+function hoistMisplacedFields(question) {
+  if (!question || typeof question !== 'object' || !question.question || typeof question.question !== 'object') {
+    return question
+  }
+  const fixed = { ...question, question: { ...question.question } }
+  for (const field of CA_QB_SIBLING_FIELDS) {
+    if (fixed[field] === undefined && fixed.question[field] !== undefined) {
+      fixed[field] = fixed.question[field]
+      delete fixed.question[field]
+    }
+  }
+  return fixed
+}
+
+function validateQuestion(question, position) {
+  const errors = []
+  const label = `Question ${position}`
+
+  if (!question || typeof question !== 'object') {
+    return [`${label}: not an object.`]
+  }
+  if (!CA_QB_VALID_TYPES.includes(question.type)) {
+    errors.push(`${label}: "type" must be one of ${CA_QB_VALID_TYPES.join('/')} (got ${JSON.stringify(question.type)}).`)
+  }
+  if (!CA_QB_VALID_DIFFICULTIES.includes(question.difficulty)) {
+    errors.push(`${label}: "difficulty" must be one of ${CA_QB_VALID_DIFFICULTIES.join('/')} (got ${JSON.stringify(question.difficulty)}).`)
+  }
+  if (!isLangTextMap(question.question)) {
+    errors.push(`${label}: "question" must be an { en, hi, ta } object of non-empty strings.`)
+  }
+  if (!isOptionsMap(question.options)) {
+    errors.push(`${label}: "options" must be an { en, hi, ta } object, each with non-empty A/B/C/D strings.`)
+  }
+  if (!CA_QB_OPTION_LETTERS.includes(question.answer)) {
+    errors.push(`${label}: "answer" must be one of A/B/C/D (got ${JSON.stringify(question.answer)}).`)
+  }
+  if (!isLangTextMap(question.explanation)) {
+    errors.push(`${label}: "explanation" must be an { en, hi, ta } object of non-empty strings.`)
+  }
+  if (!isLangTextMap(question.tip)) {
+    errors.push(`${label}: "tip" must be an { en, hi, ta } object of non-empty strings.`)
+  }
+
+  return errors
+}
+
+function normalizeAndValidateCaQb(rawData) {
+  const data = rawData.map(hoistMisplacedFields)
+  const errors = data.flatMap((question, i) => validateQuestion(question, i + 1))
+  return { data, errors }
+}
+
 // ---- index.js ----
 const HTML_BUILDERS = {
   spoken: buildResultHtml,
@@ -1843,7 +1923,12 @@ async function handleGenerateCaQb(request, env) {
     )
   }
 
-  return json(env, { data })
+  const { data: normalized, errors } = normalizeAndValidateCaQb(data)
+  if (errors.length > 0) {
+    return json(env, { error: `AI response failed structure validation:\n${errors.join('\n')}` }, 502)
+  }
+
+  return json(env, { data: normalized })
 }
 
 async function handleUpload(request, env) {
