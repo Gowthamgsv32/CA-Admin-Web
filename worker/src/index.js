@@ -5,6 +5,7 @@ import { purgeCdnCache } from './doCdn.js'
 import { buildRecallGamePrompt } from './recallGamePrompts.js'
 import { buildTnpscPrompt } from './tnpscPrompts.js'
 import { buildCaQuestionPrompt } from './caQuestionPrompts.js'
+import { buildCaQbPrompt } from './caQbPrompts.js'
 
 const HTML_BUILDERS = {
   spoken: buildResultHtml,
@@ -326,6 +327,64 @@ async function handleGetSheetTabs(request, env) {
   return json(env, { tabs })
 }
 
+const CA_QB_GENERATION_CONFIG = {
+  temperature: 0.4,
+  maxOutputTokens: 8192,
+  thinkingConfig: { thinkingBudget: 0 },
+}
+
+// CA QB Parser: turns one article's { topic, text } into a full question
+// bank batch (>= 2 questions, all 4 exam types). qid is assigned by the
+// frontend, so this just returns the parsed JSON array.
+async function handleGenerateCaQb(request, env) {
+  const { topic, text } = await request.json()
+
+  if (!topic || !text) {
+    return json(env, { error: 'Missing topic or text.' }, 400)
+  }
+
+  const apiKeys = parseApiKeys(env.GEMINI_API_KEY)
+  if (apiKeys.length === 0) {
+    return json(env, { error: 'No Gemini API key configured.' }, 500)
+  }
+
+  let geminiRes
+  try {
+    geminiRes = await callGeminiWithFallback(buildCaQbPrompt({ topic, text }), apiKeys, CA_QB_GENERATION_CONFIG)
+  } catch (err) {
+    return json(env, { error: `Gemini request failed on every API key: ${err.message}` }, 503)
+  }
+
+  const geminiBody = await geminiRes.json()
+  if (geminiBody.error) {
+    return json(env, { error: geminiBody.error.message }, 502)
+  }
+
+  const finishReason = geminiBody.candidates?.[0]?.finishReason
+  let rawText = geminiBody.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+  rawText = rawText.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim()
+
+  let data
+  try {
+    data = JSON.parse(rawText)
+  } catch {
+    if (finishReason === 'MAX_TOKENS') {
+      return json(env, { error: 'Gemini response was cut off (ran out of output tokens) before finishing the JSON. Try again.' }, 502)
+    }
+    return json(env, { error: `Failed to parse AI response: ${rawText}` }, 502)
+  }
+
+  if (!Array.isArray(data) || data.length < 2) {
+    return json(
+      env,
+      { error: `Expected at least 2 questions, got ${Array.isArray(data) ? data.length : 'an invalid response'}.` },
+      502
+    )
+  }
+
+  return json(env, { data })
+}
+
 async function handleUpload(request, env) {
   const { date, json: jsonPayload } = await request.json()
 
@@ -424,6 +483,9 @@ export default {
       }
       if (request.method === 'POST' && url.pathname === '/generate-ca-questions') {
         return await handleGenerateCaQuestions(request, env)
+      }
+      if (request.method === 'POST' && url.pathname === '/generate-ca-qb') {
+        return await handleGenerateCaQb(request, env)
       }
       if (request.method === 'POST' && url.pathname === '/ca-sheet-tabs') {
         return await handleGetSheetTabs(request, env)

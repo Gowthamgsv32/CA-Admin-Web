@@ -8,6 +8,7 @@ const descriptions = {
   '/ca-parser': 'Extract and validate CA-specific document data.',
   '/recall-game-parser': 'Generate and publish recall game content.',
   '/tnpsc-parser': 'Turn textbook PDFs into TNPSC exam question JSON with Gemini.',
+  '/ca-qb-parser': 'Generate a full exam-style question bank from a day’s current affairs.',
 }
 
 const tools = navItems.filter((item) => item.to !== '/')
