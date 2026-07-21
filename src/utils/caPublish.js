@@ -67,6 +67,51 @@ export function buildNextCaGameRoot({ currentRoot, selectedDateDMY, monthCasCoun
   return { ...result, root }
 }
 
+// gameRoot.json is a second, independent root/index also served from
+// Cagame/ — schema is unrelated to root.json's (own top-level "date"/"ver",
+// "last_updated_game_url" instead of "ca_url", and a "downloads" array
+// instead of "av_mos", each entry carrying a single "N questions" desc
+// rather than CurrentAffairs's combined cas+questions count).
+export function buildNextGameRoot({ currentGameRoot, selectedDateDMY, monthQuestionsCount, baseUrl }) {
+  const monthKey = monthKeyFromDMY(selectedDateDMY)
+  const desc = `${monthQuestionsCount} questions`
+
+  const nextRoot = {
+    ...currentGameRoot,
+    date: selectedDateDMY,
+    ver: String(Number(currentGameRoot.ver) + 1),
+    last_updated_game_url: `${baseUrl}/${selectedDateDMY}.zip`,
+  }
+
+  const downloads = [...(currentGameRoot.downloads || [])]
+  const existingIndex = downloads.findIndex((d) => d.month === monthKey)
+
+  if (existingIndex !== -1) {
+    const existing = downloads[existingIndex]
+    downloads[existingIndex] = {
+      ...existing,
+      desc,
+      ver: String(Number(existing.ver) + 1),
+    }
+    nextRoot.downloads = downloads
+    return { root: nextRoot, monthEntryIndex: existingIndex, isNewMonth: false }
+  }
+
+  const newEntry = {
+    title: `${monthNameFromDMY(selectedDateDMY)} Monthly Game`,
+    desc,
+    zip_url: `${baseUrl}/${monthKey}.zip`,
+    status: false,
+    month: monthKey,
+    ver: '1',
+    type: 'MONTHLY',
+  }
+  downloads.unshift(newEntry)
+  nextRoot.downloads = downloads
+
+  return { root: nextRoot, monthEntryIndex: 0, isNewMonth: true }
+}
+
 // Packages the month json into a single-entry zip — the format both the
 // "Download All" bundle and the Spaces upload use for `{monthKey}.zip`,
 // matching root.json av_mos[i].zip_url.
