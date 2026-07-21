@@ -23,6 +23,12 @@ export const CA_GAME_BASE = 'https://healthappobjects.ams3.cdn.digitaloceanspace
 
 export const CA_GAME_ROOT_URL = `${CA_GAME_BASE}/root.json`
 
+// A second, independent root/index file also served from Cagame/ — used by
+// the quiz-game consumer of the CA QB Parser's question bank. Distinct from
+// CA_GAME_ROOT_URL's root.json (av_mos schema): gameRoot.json uses its own
+// "downloads" schema and is versioned separately.
+export const CA_GAME_QB_ROOT_URL = `${CA_GAME_BASE}/gameRoot.json`
+
 // Current Affairs content sheet — one tab per month (e.g. "July"), maintained
 // by hand. Must be shared as "Anyone with the link can view" for the gviz
 // CSV export below to work.
