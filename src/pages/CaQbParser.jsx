@@ -46,6 +46,12 @@ function CaQbParser() {
   const [generateError, setGenerateError] = useState('')
   const [questions, setQuestions] = useState([])
 
+  // One entry per dayData.cas article, same index — tracks per-article
+  // progress so a single Gemini failure (or a bad JSON parse) doesn't lose
+  // every other article's already-generated questions and force a full
+  // restart. { status: 'idle' | 'loading' | 'success' | 'error', error }
+  const [articleStatus, setArticleStatus] = useState([])
+
   const [previewLang, setPreviewLang] = useState('en')
 
   const dateDMY = useMemo(() => (date ? isoToDMY(date) : ''), [date])
@@ -54,6 +60,7 @@ function CaQbParser() {
     setDayError('')
     setDayData(null)
     setQuestions([])
+    setArticleStatus([])
     setGenerateError('')
 
     if (!dateDMY) {
@@ -77,6 +84,41 @@ function CaQbParser() {
     }
   }
 
+  function setStatusAt(index, patch) {
+    setArticleStatus((prev) => prev.map((s, i) => (i === index ? { ...s, ...patch } : s)))
+  }
+
+  // Generates one article's questions and appends them to `questions`
+  // (qid continues from whatever's already there, so retries just add on
+  // at the end rather than disturbing already-assigned qids). Never throws —
+  // failures are recorded on articleStatus[index] so the caller can move on
+  // to the next article instead of aborting the whole batch.
+  async function generateArticle(index) {
+    const article = dayData.cas[index]
+    setStatusAt(index, { status: 'loading', error: '' })
+
+    try {
+      const res = await fetch(`${WORKER_URL}/generate-ca-qb`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ topic: article.title_en, text: article.desc_en }),
+      })
+      const result = await res.json()
+      if (!res.ok || result.error) {
+        throw new Error(result.error || `Request failed (${res.status})`)
+      }
+
+      const dateDigits = dateDMY.replace(/-/g, '')
+      setQuestions((prev) => [
+        ...prev,
+        ...result.data.map((q, i) => ({ qid: String(`${dateDigits}${prev.length + i + 1}`), ...q })),
+      ])
+      setStatusAt(index, { status: 'success', error: '' })
+    } catch (err) {
+      setStatusAt(index, { status: 'error', error: err.message })
+    }
+  }
+
   async function handleGenerateQb() {
     setGenerateError('')
     setQuestions([])
@@ -86,38 +128,47 @@ function CaQbParser() {
       return
     }
 
-    const dateDigits = dateDMY.replace(/-/g, '')
-    const collected = []
+    setArticleStatus(dayData.cas.map(() => ({ status: 'idle', error: '' })))
 
     setGenerating(true)
     try {
       for (let i = 0; i < dayData.cas.length; i++) {
-        const article = dayData.cas[i]
-        setGenerateProgress(`Generating ${i + 1} of ${dayData.cas.length}: ${article.title_en}`)
-
-        const res = await fetch(`${WORKER_URL}/generate-ca-qb`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ topic: article.title_en, text: article.desc_en }),
-        })
-        const result = await res.json()
-        if (!res.ok || result.error) {
-          throw new Error(`"${article.title_en}": ${result.error || `Request failed (${res.status})`}`)
-        }
-
-        for (const q of result.data) {
-          collected.push({ qid: String(`${dateDigits}${collected.length + 1}`), ...q })
-        }
+        setGenerateProgress(`Generating ${i + 1} of ${dayData.cas.length}: ${dayData.cas[i].title_en}`)
+        await generateArticle(i)
       }
-      setQuestions(collected)
-    } catch (err) {
-      setGenerateError(err.message)
-      setQuestions(collected) // keep whatever was generated before the failure
     } finally {
       setGenerating(false)
       setGenerateProgress('')
     }
   }
+
+  async function handleRetryArticle(index) {
+    await generateArticle(index)
+  }
+
+  async function handleRetryFailed() {
+    setGenerating(true)
+    try {
+      for (let i = 0; i < articleStatus.length; i++) {
+        if (articleStatus[i]?.status === 'error') {
+          setGenerateProgress(`Retrying ${i + 1} of ${dayData.cas.length}: ${dayData.cas[i].title_en}`)
+          await generateArticle(i)
+        }
+      }
+    } finally {
+      setGenerating(false)
+      setGenerateProgress('')
+    }
+  }
+
+  const failedCount = useMemo(
+    () => articleStatus.filter((s) => s.status === 'error').length,
+    [articleStatus]
+  )
+  // Covers both the bulk loop (`generating`) and a lone row retry fired via
+  // its own Retry button — disabling actions during either prevents a
+  // concurrent full re-generate from clobbering an in-flight retry's slot.
+  const anyLoading = generating || articleStatus.some((s) => s.status === 'loading')
 
   function handleDownloadDayJson() {
     if (questions.length === 0) return
@@ -174,20 +225,52 @@ function CaQbParser() {
                 <tr>
                   <th>Title</th>
                   <th>Category</th>
+                  {articleStatus.length > 0 && <th>Status</th>}
                 </tr>
               </thead>
               <tbody>
-                {dayData.cas.map((c) => (
+                {dayData.cas.map((c, i) => (
                   <tr key={c.id}>
                     <td>{c.title_en}</td>
                     <td>{c.category}</td>
+                    {articleStatus.length > 0 && (
+                      <td>
+                        {articleStatus[i]?.status === 'loading' && <span className="field-hint">Generating…</span>}
+                        {articleStatus[i]?.status === 'idle' && <span className="field-hint">Pending</span>}
+                        {articleStatus[i]?.status === 'success' && (
+                          <span style={{ color: '#1f9d5a', fontWeight: 600, fontSize: 13 }}>✓ Done</span>
+                        )}
+                        {articleStatus[i]?.status === 'error' && (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{ color: '#d64545', fontWeight: 600, fontSize: 13 }} title={articleStatus[i].error}>
+                              Failed
+                            </span>
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              style={{ padding: '4px 10px', fontSize: 12 }}
+                              onClick={() => handleRetryArticle(i)}
+                              disabled={anyLoading}
+                            >
+                              Retry
+                            </button>
+                          </span>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
 
-          {generating && <p className="field-hint">{generateProgress}</p>}
+          {anyLoading && <p className="field-hint">{generateProgress}</p>}
+          {!anyLoading && failedCount > 0 && (
+            <div className="alert alert-error">
+              {failedCount} article{failedCount === 1 ? '' : 's'} failed to generate — retry individually above, or
+              retry all failed at once.
+            </div>
+          )}
           {generateError && (
             <div className="alert alert-error" style={{ whiteSpace: 'pre-wrap' }}>
               {generateError}
@@ -195,9 +278,14 @@ function CaQbParser() {
           )}
 
           <div className="form-actions">
-            <button type="button" className="btn btn-primary" onClick={handleGenerateQb} disabled={generating}>
+            <button type="button" className="btn btn-primary" onClick={handleGenerateQb} disabled={anyLoading}>
               {generating ? 'Generating…' : 'Generate Question Bank'}
             </button>
+            {!anyLoading && failedCount > 0 && (
+              <button type="button" className="btn btn-ghost" onClick={handleRetryFailed}>
+                Retry Failed ({failedCount})
+              </button>
+            )}
           </div>
         </section>
       )}
