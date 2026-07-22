@@ -216,9 +216,11 @@ function CaQbParser() {
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // gameRoot.json's month zip is shared with the Cagame feature's own
-  // day/month zips (same Cagame/{month}.zip file), so this pulls the JSON
+  // day/month zips (same Cagame/{month}.zip file, key auto-derived from the
+  // selected date's month/year via monthKey above), so this pulls the JSON
   // back out of it the same way — extract, then merge this day's questions
-  // into whatever's already published for the month.
+  // into whatever's already published for the month. The file is a bare
+  // question array (not wrapped in an object), matching what gets published.
   useEffect(() => {
     if (!monthKey) return
     setGameMonthError('')
@@ -226,24 +228,25 @@ function CaQbParser() {
     fetch(`${CA_GAME_BASE}/${monthKey}.zip`, { cache: 'no-store' })
       .then(async (res) => {
         if (!res.ok) {
-          if (res.status === 404 || res.status === 403) return { questions: [] }
+          if (res.status === 404 || res.status === 403) return []
           throw new Error(`Failed to load ${monthKey}.zip (${res.status})`)
         }
         const buffer = new Uint8Array(await res.arrayBuffer())
         const jsonBytes = extractFirstFileFromZip(buffer)
-        return JSON.parse(new TextDecoder().decode(jsonBytes))
+        const parsed = JSON.parse(new TextDecoder().decode(jsonBytes))
+        return Array.isArray(parsed) ? parsed : []
       })
-      .then((data) => setGameMonthJson({ questions: Array.isArray(data.questions) ? data.questions : [] }))
+      .then((data) => setGameMonthJson(data))
       .catch((err) => {
         setGameMonthError(err.message)
-        setGameMonthJson({ questions: [] })
+        setGameMonthJson([])
       })
       .finally(() => setGameMonthLoading(false))
   }, [monthKey])
 
   const gameMergedMonthJson = useMemo(() => {
     if (!gameMonthJson) return null
-    return { questions: [...gameMonthJson.questions, ...questions] }
+    return [...gameMonthJson, ...questions]
   }, [gameMonthJson, questions])
 
   const gameRootPreview = useMemo(() => {
@@ -251,7 +254,7 @@ function CaQbParser() {
     return buildNextGameRoot({
       currentGameRoot: gameRoot,
       selectedDateDMY: dateDMY,
-      monthQuestionsCount: gameMergedMonthJson.questions.length,
+      monthQuestionsCount: gameMergedMonthJson.length,
       baseUrl: CA_GAME_BASE,
     })
   }, [gameRoot, dateDMY, gameMergedMonthJson])
@@ -259,7 +262,7 @@ function CaQbParser() {
   function handleDownloadGameZip() {
     if (!gameRootPreview || questions.length === 0 || !gameMergedMonthJson || !dateDMY || !monthKey) return
     const dayZipBytes = createZip([
-      { name: `${dateDMY}.json`, data: new TextEncoder().encode(JSON.stringify({ questions })) },
+      { name: `${dateDMY}.json`, data: new TextEncoder().encode(JSON.stringify(questions)) },
     ])
     const monthZipBytes = createZip([
       { name: `${monthKey}.json`, data: new TextEncoder().encode(JSON.stringify(gameMergedMonthJson)) },
@@ -285,7 +288,7 @@ function CaQbParser() {
     setPublishingGame(true)
     try {
       const dayZipBytes = createZip([
-        { name: `${dateDMY}.json`, data: new TextEncoder().encode(JSON.stringify({ questions })) },
+        { name: `${dateDMY}.json`, data: new TextEncoder().encode(JSON.stringify(questions)) },
       ])
       const monthZipBytes = createZip([
         { name: `${monthKey}.json`, data: new TextEncoder().encode(JSON.stringify(gameMergedMonthJson)) },
@@ -592,7 +595,7 @@ function CaQbParser() {
 
           <div className="result-toolbar">
             <h3>Month JSON — {monthKey}.zip</h3>
-            <span className="field-hint">{gameMergedMonthJson.questions.length} questions</span>
+            <span className="field-hint">{gameMergedMonthJson.length} questions</span>
           </div>
           <pre className="json-preview">{JSON.stringify(gameMergedMonthJson, null, 2)}</pre>
 
