@@ -179,15 +179,29 @@ function CAParser() {
     handleLoadCaRoot()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // The month json url/key is always derived from whichever date is picked —
+  // pick a different date and everything below (existing question count,
+  // month file fetched, root av_mos entry updated) follows automatically.
+  const genMonthKey = useMemo(() => (genDate ? monthKeyFromDMY(genDate) : ''), [genDate])
+
+  // The av_mos entry for the month actually being generated — not just
+  // av_mos[0] (the most recently *published* month), which is a different
+  // entry whenever generating for a month that hasn't been published yet.
+  const sheetVersionMonthEntry = useMemo(
+    () => caRoot?.av_mos?.find((m) => m.month === genMonthKey) || null,
+    [caRoot, genMonthKey]
+  )
+
   // The sheet stamps each cas row with a "ver" (used for client-side cache
-  // busting). Publishing bumps both root.ver and the month's av_mos entry ver
-  // by 1, so the stamp should target that upcoming version, not the currently
-  // live one — e.g. av_mos[0].ver "10" -> next ver 11 -> stamp 11000.
+  // busting), scoped to the month being generated: continues from that
+  // month's own av_mos entry when one already exists, or starts fresh at
+  // 1000 when it doesn't (a new month) — e.g. existing ver "10" -> next ver
+  // 11 -> stamp 11000; no existing entry -> next ver 1 -> stamp 1000.
   useEffect(() => {
-    if (!caRoot) return
-    const nextMonthVer = (Number(caRoot.av_mos?.[0]?.ver) || 0) + 1
+    if (!caRoot || !genMonthKey) return
+    const nextMonthVer = (Number(sheetVersionMonthEntry?.ver) || 0) + 1
     setSheetVersion(String(nextMonthVer * 1000))
-  }, [caRoot])
+  }, [caRoot, genMonthKey, sheetVersionMonthEntry])
 
   const dayJsonPreview = useMemo(() => {
     if (!sheetParsed || !genDate) return null
@@ -198,11 +212,6 @@ function CAParser() {
     if (!sheetParsed) return null
     return { cas: sheetParsed.cas, questions: [...(remoteMonthQuestions || []), ...generatedQuestions] }
   }, [sheetParsed, remoteMonthQuestions, generatedQuestions])
-
-  // The month json url/key is always derived from whichever date is picked —
-  // pick a different date and everything below (existing question count,
-  // month file fetched, root av_mos entry updated) follows automatically.
-  const genMonthKey = useMemo(() => (genDate ? monthKeyFromDMY(genDate) : ''), [genDate])
 
   // A newly generated batch only makes sense for the date/month it was
   // generated for — switching either invalidates it and re-fetches the
@@ -586,7 +595,10 @@ function CAParser() {
               {caRootError && `Couldn't load root.json: ${caRootError}`}
               {caRoot &&
                 !caRootLoading &&
-                `Next av_mos[0].ver (${caRoot.av_mos?.[0]?.ver} + 1) × 1000`}
+                genMonthKey &&
+                (sheetVersionMonthEntry
+                  ? `Next ${genMonthKey} ver (${sheetVersionMonthEntry.ver} + 1) × 1000`
+                  : `New month ${genMonthKey} — starts at 1000`)}
             </span>
           </label>
           <label className="field" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
