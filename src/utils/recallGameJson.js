@@ -1,7 +1,5 @@
 import { baseIdFromDMY } from './dailyBytesJson'
 
-const VERSION_STORAGE_KEY = 'recallGameJsonVersion'
-
 // 3 exp cards cover more distinct facts than 2, so give the player a bit
 // longer to read/answer.
 function timeForExpCount(count) {
@@ -37,22 +35,4 @@ export function buildTopicsJson({ dateDMY, ver, generatedList }) {
   }))
 
   return { topics }
-}
-
-export function loadStoredRecallVersion() {
-  try {
-    const raw = localStorage.getItem(VERSION_STORAGE_KEY)
-    const num = Number(raw)
-    return Number.isFinite(num) ? num : 0
-  } catch {
-    return 0
-  }
-}
-
-export function saveStoredRecallVersion(ver) {
-  try {
-    localStorage.setItem(VERSION_STORAGE_KEY, String(ver))
-  } catch {
-    // localStorage unavailable — non-critical, skip persisting.
-  }
 }

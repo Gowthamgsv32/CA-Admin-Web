@@ -18,7 +18,6 @@ const HINT_BY_CONTENT_TYPE = {
 
 export const BYTES_ORDER = ['grammer', 'spoken', 'phrase', 'word']
 
-const VERSION_STORAGE_KEY = 'dailyBytesJsonVersion'
 const LAST_DAY_STORAGE_KEY = 'dailyBytesLastDay'
 
 export function baseIdFromDMY(dateDMY) {
@@ -55,46 +54,23 @@ export function buildDayBytesJson({ dateDMY, ver, resultsByType }) {
   return { bytes }
 }
 
-// Merges a day's 4 bytes objects into the month's existing bytes array.
-// Every object across the whole month shares one version number, so every
-// existing entry gets bumped +1000 right alongside the newly appended day
-// entries, which are re-stamped to the same new version (their provisional
-// version from buildDayBytesJson is discarded in favor of this authoritative
-// one, since the month file fetched from the server is the source of truth,
-// not whatever the browser's local counter happened to guess).
-export function mergeBytesMonthJson({ currentMonthJson, dayBytes, fallbackVer }) {
-  const existing = currentMonthJson?.bytes || []
+// Merges a day's 4 bytes objects into the month's existing bytes, taking the
+// union of the server's copy and whatever's already known locally (from an
+// earlier "Convert JSON" this session that hasn't been published yet) —
+// deduped by id, new day entries winning any collision — so a day converted
+// but not yet published doesn't silently disappear the next time a
+// different day is converted and re-fetches the month fresh from the
+// server. Every object across the whole month shares one version number
+// (`ver`, computed by the caller from root.json's own per-month version —
+// see nextMonthVerStamp), so every entry gets re-stamped to it.
+export function mergeBytesMonthJson({ serverMonthJson, localMonthJson, dayBytes, ver }) {
+  const byId = new Map()
+  for (const entry of serverMonthJson?.bytes || []) byId.set(entry.id, entry)
+  for (const entry of localMonthJson?.bytes || []) byId.set(entry.id, entry)
+  for (const entry of dayBytes) byId.set(entry.id, entry)
 
-  if (existing.length === 0) {
-    const restampedDay = dayBytes.map((entry) => ({ ...entry, ver: fallbackVer }))
-    return { bytes: restampedDay, ver: fallbackVer }
-  }
-
-  const existingVer = Number(existing[existing.length - 1].ver)
-  const newVer = existingVer + 1000
-
-  const bumped = existing.map((entry) => ({ ...entry, ver: newVer }))
-  const restampedDay = dayBytes.map((entry) => ({ ...entry, ver: newVer }))
-
-  return { bytes: [...bumped, ...restampedDay], ver: newVer }
-}
-
-export function loadStoredVersion() {
-  try {
-    const raw = localStorage.getItem(VERSION_STORAGE_KEY)
-    const num = Number(raw)
-    return Number.isFinite(num) ? num : 0
-  } catch {
-    return 0
-  }
-}
-
-export function saveStoredVersion(ver) {
-  try {
-    localStorage.setItem(VERSION_STORAGE_KEY, String(ver))
-  } catch {
-    // localStorage unavailable — non-critical, skip persisting.
-  }
+  const bytes = [...byId.values()].sort((a, b) => a.id - b.id).map((entry) => ({ ...entry, ver }))
+  return { bytes }
 }
 
 // Remembers the last day number a "Convert JSON" completed for, so the

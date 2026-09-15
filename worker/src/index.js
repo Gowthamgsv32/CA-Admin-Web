@@ -3,6 +3,7 @@ import { buildResultHtml, buildGrammarHtml, buildPhraseHtml, buildWordHtml } fro
 import { putObjectToSpaces } from './spaces.js'
 import { purgeCdnCache } from './doCdn.js'
 import { buildRecallGamePrompt } from './recallGamePrompts.js'
+import { validateRecallGameData } from './recallGameValidate.js'
 import { buildTnpscPrompt } from './tnpscPrompts.js'
 import { buildCaQuestionPrompt } from './caQuestionPrompts.js'
 import { buildCaQbPrompt } from './caQbPrompts.js'
@@ -191,6 +192,11 @@ async function handleGenerateRecall(request, env) {
       return json(env, { error: 'Gemini response was cut off (ran out of output tokens) before finishing the JSON. Try again.' }, 502)
     }
     return json(env, { error: `Failed to parse AI response: ${rawText}` }, 502)
+  }
+
+  const validationErrors = validateRecallGameData(data)
+  if (validationErrors.length > 0) {
+    return json(env, { error: `AI response failed structure validation:\n${validationErrors.join('\n')}` }, 502)
   }
 
   return json(env, { data })

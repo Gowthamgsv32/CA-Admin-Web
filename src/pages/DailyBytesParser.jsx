@@ -1,14 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { DAILY_BYTES_BASE, ROOT_URL, TOPICS_URL, VER_FILE_URL, WORKER_URL } from '../config/api'
-import { buildNextRoot, buildNextVerFile, isoToDMY, monthKeyFromDMY } from '../utils/dailyBytesPublish'
+import { buildNextRoot, buildNextVerFile, isoToDMY, monthKeyFromDMY, nextMonthVerStamp } from '../utils/dailyBytesPublish'
 import {
   BYTES_ORDER,
   buildDayBytesJson,
   loadLastDayNumber,
-  loadStoredVersion,
   mergeBytesMonthJson,
   saveLastDayNumber,
-  saveStoredVersion,
 } from '../utils/dailyBytesJson'
 import { bytesToBase64, createZip } from '../utils/zip'
 import { downloadBlob } from '../utils/download'
@@ -324,6 +322,10 @@ function DailyBytesParser() {
       setConvertError('Please enter a day.')
       return
     }
+    if (!currentRoot) {
+      setConvertError('Root not loaded yet — click Refresh under Server State and try again.')
+      return
+    }
 
     const missing = []
     const resultsByType = {}
@@ -345,13 +347,13 @@ function DailyBytesParser() {
     try {
       const dateDMY = isoToDMY(date)
       const dayMonthKey = monthKeyFromDMY(dateDMY)
-      const provisionalVer = loadStoredVersion() + 1000
-      const provisionalDay = buildDayBytesJson({ dateDMY, ver: provisionalVer, resultsByType })
+      const nextVer = nextMonthVerStamp(currentRoot, dayMonthKey)
+      const dayBytesJson = buildDayBytesJson({ dateDMY, ver: nextVer, resultsByType })
 
-      let currentMonthJson = null
+      let serverMonthJson = null
       const monthRes = await fetch(`${DAILY_BYTES_BASE}/${dayMonthKey}.json`, { cache: 'no-store' })
       if (monthRes.ok) {
-        currentMonthJson = await monthRes.json()
+        serverMonthJson = await monthRes.json()
       } else if (monthRes.status !== 404 && monthRes.status !== 403) {
         // Spaces returns 403 (not 404) for a GET on a key that was never
         // written, when the bucket doesn't allow public listing — so a
@@ -359,30 +361,29 @@ function DailyBytesParser() {
         throw new Error(`Failed to load ${dayMonthKey}.json (${monthRes.status})`)
       }
 
-      const { bytes: mergedBytes, ver: finalVer } = mergeBytesMonthJson({
-        currentMonthJson,
-        dayBytes: provisionalDay.bytes,
-        fallbackVer: provisionalVer,
+      // `monthJson` (component state) already reflects any earlier,
+      // not-yet-published "Convert JSON" for this same month this session —
+      // union it in so that progress isn't silently lost just because this
+      // convert re-fetches the server's copy fresh.
+      const mergedMonthJson = mergeBytesMonthJson({
+        serverMonthJson,
+        localMonthJson: monthJson,
+        dayBytes: dayBytesJson.bytes,
+        ver: nextVer,
       })
-
-      const finalDayJson = {
-        bytes: provisionalDay.bytes.map((entry) => ({ ...entry, ver: finalVer })),
-      }
-      const mergedMonthJson = { bytes: mergedBytes }
       const zipData = zipFileFromMonthJson(dayMonthKey, mergedMonthJson)
 
       try {
-        localStorage.setItem(dayJsonCacheKey(day), JSON.stringify(finalDayJson))
+        localStorage.setItem(dayJsonCacheKey(day), JSON.stringify(dayBytesJson))
         localStorage.setItem(monthJsonCacheKey(dayMonthKey), JSON.stringify(mergedMonthJson))
       } catch {
         // localStorage unavailable/full — the previews below still show the result.
       }
-      saveStoredVersion(finalVer)
 
       const dayNum = Number(day)
       if (Number.isFinite(dayNum) && dayNum > 0) saveLastDayNumber(dayNum)
 
-      setDayJson(finalDayJson)
+      setDayJson(dayBytesJson)
       setMonthJson(mergedMonthJson)
       setZipBytes(zipData)
     } catch (err) {
@@ -495,7 +496,13 @@ function DailyBytesParser() {
         })
       } else {
         setPublishStatus({ type: 'success', message: `Published all 5 files for ${selectedDateDMY}.` })
-        await loadServerState()
+        // Trust what was just uploaded rather than re-fetching immediately —
+        // the CDN purge (right below) hasn't necessarily completed yet, so
+        // an immediate re-fetch of root.json/ver.json through the CDN can
+        // still return the pre-publish version and make it look like the
+        // publish had no effect.
+        setCurrentRoot(nextRootResult.root)
+        setCurrentVerFile(nextVerFile)
 
         try {
           const purgeRes = await fetch(`${WORKER_URL}/purge-cdn`, {

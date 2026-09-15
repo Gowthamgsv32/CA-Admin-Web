@@ -44,24 +44,21 @@ export function buildNextRecallRoot({ currentRoot, selectedDateDMY, questionCoun
   return { root: nextRoot, monthEntryIndex: 0, isNewMonth: true }
 }
 
-// Merges a batch's topics into the month's existing topics array. Every
-// object across the whole month shares one version number, so every
-// existing entry gets bumped +1000 right alongside the newly appended
-// batch's topics, which are re-stamped to that same new version — same
-// scheme as Daily Bytes' mergeBytesMonthJson.
-export function mergeTopicsMonthJson({ currentMonthJson, dayTopics, fallbackVer }) {
-  const existing = currentMonthJson?.topics || []
+// Merges a batch's topics into the month's existing topics, taking the
+// union of the server's copy and whatever's already known locally (from an
+// earlier "Generate Recall Game JSON" this session that hasn't been
+// published yet) — deduped by id, new batch entries winning any collision —
+// so a batch generated but not yet published doesn't silently disappear the
+// next time a different batch is generated and re-fetches the month fresh
+// from the server. Every object across the whole month shares one version
+// number (`ver`, computed by the caller from recall-root.json's own
+// per-month version), so every entry gets re-stamped to it.
+export function mergeTopicsMonthJson({ serverMonthJson, localMonthJson, dayTopics, ver }) {
+  const byId = new Map()
+  for (const entry of serverMonthJson?.topics || []) byId.set(entry.id, entry)
+  for (const entry of localMonthJson?.topics || []) byId.set(entry.id, entry)
+  for (const entry of dayTopics) byId.set(entry.id, entry)
 
-  if (existing.length === 0) {
-    const restamped = dayTopics.map((entry) => ({ ...entry, ver: fallbackVer }))
-    return { topics: restamped, ver: fallbackVer }
-  }
-
-  const existingVer = Number(existing[existing.length - 1].ver)
-  const newVer = existingVer + 1000
-
-  const bumped = existing.map((entry) => ({ ...entry, ver: newVer }))
-  const restamped = dayTopics.map((entry) => ({ ...entry, ver: newVer }))
-
-  return { topics: [...bumped, ...restamped], ver: newVer }
+  const topics = [...byId.values()].sort((a, b) => a.id - b.id).map((entry) => ({ ...entry, ver }))
+  return { topics }
 }
