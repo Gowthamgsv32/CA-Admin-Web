@@ -6,8 +6,8 @@ import {
   RECALL_GAME_USED_ARTICLES_URL,
   WORKER_URL,
 } from '../config/api'
-import { isoToDMY, monthKeyFromDMY } from '../utils/dailyBytesPublish'
-import { buildTopicsJson, loadStoredRecallVersion, saveStoredRecallVersion } from '../utils/recallGameJson'
+import { isoToDMY, monthKeyFromDMY, nextMonthVerStamp } from '../utils/dailyBytesPublish'
+import { buildTopicsJson } from '../utils/recallGameJson'
 import { buildNextRecallRoot, mergeTopicsMonthJson } from '../utils/recallGamePublish'
 import { mergeUsedArticleIds } from '../utils/recallGameUsage'
 import { bytesToBase64, createZip } from '../utils/zip'
@@ -235,6 +235,10 @@ function RecallGameParser() {
       setGenerateError('Please choose a date for this recall game.')
       return
     }
+    if (!currentRecallRoot) {
+      setGenerateError('recall-root.json not loaded yet — click Refresh under Server State and try again.')
+      return
+    }
 
     setGenerating(true)
     try {
@@ -265,13 +269,13 @@ function RecallGameParser() {
 
       const dateDMY = isoToDMY(gameDate)
       const dayMonthKey = monthKeyFromDMY(dateDMY)
-      const provisionalVer = loadStoredRecallVersion() + 1000
-      const provisionalDay = buildTopicsJson({ dateDMY, ver: provisionalVer, generatedList })
+      const nextVer = nextMonthVerStamp(currentRecallRoot, dayMonthKey)
+      const dayTopicsJson = buildTopicsJson({ dateDMY, ver: nextVer, generatedList })
 
-      let currentMonthJson = null
+      let serverMonthJson = null
       const monthRes = await fetch(`${RECALL_GAME_BASE}/${dayMonthKey}.json`, { cache: 'no-store' })
       if (monthRes.ok) {
-        currentMonthJson = await monthRes.json()
+        serverMonthJson = await monthRes.json()
       } else if (monthRes.status !== 404 && monthRes.status !== 403) {
         // Spaces returns 403 (not 404) for a GET on a key that was never
         // written, when the bucket doesn't allow public listing — so a
@@ -279,21 +283,19 @@ function RecallGameParser() {
         throw new Error(`Failed to load ${dayMonthKey}.json (${monthRes.status})`)
       }
 
-      const { topics: mergedTopics, ver: finalVer } = mergeTopicsMonthJson({
-        currentMonthJson,
-        dayTopics: provisionalDay.topics,
-        fallbackVer: provisionalVer,
+      // `monthJsonRecall` (component state) already reflects any earlier,
+      // not-yet-published batch generated for this same month this session —
+      // union it in so that progress isn't silently lost just because this
+      // generate re-fetches the server's copy fresh.
+      const mergedMonthJson = mergeTopicsMonthJson({
+        serverMonthJson,
+        localMonthJson: monthJsonRecall,
+        dayTopics: dayTopicsJson.topics,
+        ver: nextVer,
       })
-
-      const finalDayJson = {
-        topics: provisionalDay.topics.map((entry) => ({ ...entry, ver: finalVer })),
-      }
-      const mergedMonthJson = { topics: mergedTopics }
       const zipData = zipFileFromMonthJson(dayMonthKey, mergedMonthJson)
 
-      saveStoredRecallVersion(finalVer)
-
-      setTopicsJson(finalDayJson)
+      setTopicsJson(dayTopicsJson)
       setMonthJsonRecall(mergedMonthJson)
       setZipBytesRecall(zipData)
     } catch (err) {
@@ -381,7 +383,13 @@ function RecallGameParser() {
         })
       } else {
         setPublishStatus({ type: 'success', message: `Published all 5 files for ${gameDateDMY}.` })
-        await loadRecallServerState()
+        // Trust what was just uploaded rather than re-fetching immediately —
+        // the CDN purge (right below) hasn't necessarily completed yet, so
+        // an immediate re-fetch of recall-root.json/used-articles.json
+        // through the CDN can still return the pre-publish version and make
+        // it look like the publish had no effect.
+        setCurrentRecallRoot(nextRootResult.root)
+        setUsedArticlesJson(nextUsedArticlesJson)
 
         try {
           const purgeRes = await fetch(`${WORKER_URL}/purge-cdn`, {

@@ -823,6 +823,53 @@ Rules:
 - Return ONLY the JSON object, nothing else.`
 }
 
+// ---- recallGameValidate.js ----
+function isNonEmptyString(value) {
+  return typeof value === 'string' && value.trim().length > 0
+}
+
+function isStringArray(value) {
+  return Array.isArray(value) && value.length > 0 && value.every((item) => isNonEmptyString(item))
+}
+
+function validateRecallGameData(data) {
+  const errors = []
+
+  if (!data || typeof data !== 'object') {
+    return ['Response is not an object.']
+  }
+
+  if (!isNonEmptyString(data.question)) {
+    errors.push(`"question" must be a non-empty string (got ${JSON.stringify(data.question)}).`)
+  }
+
+  if (!isStringArray(data.hint)) {
+    errors.push('"hint" must be a non-empty array of non-empty strings.')
+  }
+
+  if (!Array.isArray(data.exp) || data.exp.length < 2 || data.exp.length > 3) {
+    errors.push(`"exp" must be an array of 2 or 3 entries (got ${Array.isArray(data.exp) ? data.exp.length : typeof data.exp}).`)
+  } else {
+    data.exp.forEach((entry, i) => {
+      const label = `exp[${i}]`
+      if (!entry || typeof entry !== 'object') {
+        errors.push(`${label}: not an object.`)
+        return
+      }
+      if (!isNonEmptyString(entry.title)) errors.push(`${label}: "title" must be a non-empty string.`)
+      if (!isNonEmptyString(entry.sub_title)) errors.push(`${label}: "sub_title" must be a non-empty string.`)
+      if (!isNonEmptyString(entry.content)) errors.push(`${label}: "content" must be a non-empty string.`)
+    })
+
+    const last = data.exp[data.exp.length - 1]
+    if (last && isNonEmptyString(last.title) && !/static gk/i.test(last.title)) {
+      errors.push(`Last exp entry's "title" must be the Static GK tie-in (got ${JSON.stringify(last.title)}).`)
+    }
+  }
+
+  return errors
+}
+
 // ---- tnpscPrompts.js ----
 // Direct port of the Python desktop app's build_prompt() — same schema,
 // same wording, same Tamil examples. Mechanically converted from the f-string
@@ -1731,6 +1778,11 @@ async function handleGenerateRecall(request, env) {
       return json(env, { error: 'Gemini response was cut off (ran out of output tokens) before finishing the JSON. Try again.' }, 502)
     }
     return json(env, { error: `Failed to parse AI response: ${rawText}` }, 502)
+  }
+
+  const validationErrors = validateRecallGameData(data)
+  if (validationErrors.length > 0) {
+    return json(env, { error: `AI response failed structure validation:\n${validationErrors.join('\n')}` }, 502)
   }
 
   return json(env, { data })

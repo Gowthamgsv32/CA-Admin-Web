@@ -22,6 +22,21 @@ export function dayOfMonthFromDMY(dmy) {
   return Number(dmy.split('-')[0])
 }
 
+// Shared per-month "content version" stamp convention (used for the ver
+// embedded in day/month JSON content, distinct from root.json's own av_mos
+// entry ver though derived from it): continues from that month's own av_mos
+// entry (existing.ver + 1) when one exists, or starts fresh at 1 for a month
+// with no entry yet — always ×1000 for the actual stamp. Deriving this from
+// root.json directly (instead of a separately-tracked local counter) keeps
+// it from drifting out of sync with root.json's own version, and makes a
+// new month reset correctly instead of continuing from whatever the last
+// month happened to reach.
+export function nextMonthVerStamp(currentRoot, monthKey) {
+  const existingEntry = currentRoot?.av_mos?.find((m) => m.month === monthKey)
+  const nextMonthVer = (Number(existingEntry?.ver) || 0) + 1
+  return nextMonthVer * 1000
+}
+
 // Returns { root, monthEntryIndex, isNewMonth } where `root` is the full
 // next daily-bytes-root.json (av_mos patched in place), and monthEntryIndex
 // points at the entry that was created/updated so the UI can offer its
