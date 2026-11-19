@@ -3,6 +3,7 @@ import { RECALL_GAME_BASE, RECALL_GAME_ROOT_URL, WORKER_URL } from '../config/ap
 import { MONTH_NAMES, dayOfMonthFromDMY } from '../utils/dailyBytesPublish'
 import { dmyForDay, monthKeyFor, patchMonthEntry } from '../utils/monthRepair'
 import { findFormatIssues, findIdConflicts, validateTopicEntry } from '../utils/monthRepairValidate'
+import { fetchFresh } from '../utils/freshFetch'
 import { bytesToBase64, createZip } from '../utils/zip'
 import MonthCalendarGrid from '../components/MonthCalendarGrid'
 import DataCheckAlerts from '../components/DataCheckAlerts'
@@ -53,7 +54,7 @@ function RecallGameMonthRepair() {
     setRootError('')
     setRootLoading(true)
     try {
-      const res = await fetch(RECALL_GAME_ROOT_URL, { cache: 'no-store' })
+      const res = await fetchFresh(RECALL_GAME_ROOT_URL)
       if (!res.ok) throw new Error(`Failed to load recall-root.json (${res.status})`)
       setRoot(await res.json())
     } catch (err) {
@@ -75,7 +76,7 @@ function RecallGameMonthRepair() {
     setPublishResults(null)
     setMonthLoading(true)
 
-    fetch(`${RECALL_GAME_BASE}/${monthKey}.json`, { cache: 'no-store' })
+    fetchFresh(`${RECALL_GAME_BASE}/${monthKey}.json`)
       .then((res) => {
         if (!res.ok) {
           if (res.status === 404 || res.status === 403) return { topics: [] }
@@ -176,7 +177,7 @@ function RecallGameMonthRepair() {
       return next
     })
     try {
-      const res = await fetch(`${RECALL_GAME_BASE}/${dateDMY}.json`, { cache: 'no-store' })
+      const res = await fetchFresh(`${RECALL_GAME_BASE}/${dateDMY}.json`)
       if (!res.ok) throw new Error(`No day file found (${res.status})`)
       const dayJson = await res.json()
 

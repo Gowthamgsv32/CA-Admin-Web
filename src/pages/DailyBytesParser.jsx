@@ -10,6 +10,7 @@ import {
 } from '../utils/dailyBytesJson'
 import { bytesToBase64, createZip } from '../utils/zip'
 import { downloadBlob } from '../utils/download'
+import { fetchFresh } from '../utils/freshFetch'
 
 const CONTENT_TYPES = [
   { value: 'spoken', label: 'Spoken' },
@@ -115,7 +116,7 @@ function DailyBytesParser() {
   useEffect(() => {
     let cancelled = false
 
-    fetch(TOPICS_URL)
+    fetchFresh(TOPICS_URL)
       .then((res) => res.json())
       .then((data) => {
         if (!cancelled) setTopicsData(data)
@@ -132,8 +133,8 @@ function DailyBytesParser() {
     setServerStateError('')
     try {
       const [rootRes, verRes] = await Promise.all([
-        fetch(ROOT_URL, { cache: 'no-store' }),
-        fetch(VER_FILE_URL, { cache: 'no-store' }),
+        fetchFresh(ROOT_URL),
+        fetchFresh(VER_FILE_URL),
       ])
       if (!rootRes.ok) throw new Error(`Failed to load root.json (${rootRes.status})`)
       if (!verRes.ok) throw new Error(`Failed to load ver.json (${verRes.status})`)
@@ -351,7 +352,7 @@ function DailyBytesParser() {
       const dayBytesJson = buildDayBytesJson({ dateDMY, ver: nextVer, resultsByType })
 
       let serverMonthJson = null
-      const monthRes = await fetch(`${DAILY_BYTES_BASE}/${dayMonthKey}.json`, { cache: 'no-store' })
+      const monthRes = await fetchFresh(`${DAILY_BYTES_BASE}/${dayMonthKey}.json`)
       if (monthRes.ok) {
         serverMonthJson = await monthRes.json()
       } else if (monthRes.status !== 404 && monthRes.status !== 403) {

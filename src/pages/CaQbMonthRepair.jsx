@@ -3,6 +3,7 @@ import { CA_GAME_BASE, CA_GAME_QB_ROOT_URL, WORKER_URL } from '../config/api'
 import { MONTH_NAMES } from '../utils/dailyBytesPublish'
 import { dmyForDay, monthKeyFor, patchMonthEntry } from '../utils/monthRepair'
 import { findFormatIssues, findIdConflicts, validateQbQuestionEntry } from '../utils/monthRepairValidate'
+import { fetchFresh } from '../utils/freshFetch'
 import { bytesToBase64, createZip, extractFirstFileFromZip } from '../utils/zip'
 import MonthCalendarGrid from '../components/MonthCalendarGrid'
 import DataCheckAlerts from '../components/DataCheckAlerts'
@@ -28,7 +29,7 @@ function zipFileFromArray(monthKey, arr) {
 }
 
 async function fetchAndExtractZip(url) {
-  const res = await fetch(url, { cache: 'no-store' })
+  const res = await fetchFresh(url)
   if (!res.ok) {
     const err = new Error(`Request failed (${res.status})`)
     err.status = res.status
@@ -73,7 +74,7 @@ function CaQbMonthRepair() {
     setRootError('')
     setRootLoading(true)
     try {
-      const res = await fetch(CA_GAME_QB_ROOT_URL, { cache: 'no-store' })
+      const res = await fetchFresh(CA_GAME_QB_ROOT_URL)
       if (!res.ok) throw new Error(`Failed to load gameRoot.json (${res.status})`)
       setRoot(await res.json())
     } catch (err) {

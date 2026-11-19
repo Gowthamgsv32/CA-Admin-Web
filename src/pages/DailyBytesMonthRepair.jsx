@@ -3,6 +3,7 @@ import { DAILY_BYTES_BASE, ROOT_URL, WORKER_URL } from '../config/api'
 import { MONTH_NAMES, dayOfMonthFromDMY } from '../utils/dailyBytesPublish'
 import { dmyForDay, monthKeyFor, patchMonthEntry } from '../utils/monthRepair'
 import { findFormatIssues, findIdConflicts, validateBytesEntry } from '../utils/monthRepairValidate'
+import { fetchFresh } from '../utils/freshFetch'
 import { bytesToBase64, createZip } from '../utils/zip'
 import MonthCalendarGrid from '../components/MonthCalendarGrid'
 import DataCheckAlerts from '../components/DataCheckAlerts'
@@ -53,7 +54,7 @@ function DailyBytesMonthRepair() {
     setRootError('')
     setRootLoading(true)
     try {
-      const res = await fetch(ROOT_URL, { cache: 'no-store' })
+      const res = await fetchFresh(ROOT_URL)
       if (!res.ok) throw new Error(`Failed to load root.json (${res.status})`)
       setRoot(await res.json())
     } catch (err) {
@@ -75,7 +76,7 @@ function DailyBytesMonthRepair() {
     setPublishResults(null)
     setMonthLoading(true)
 
-    fetch(`${DAILY_BYTES_BASE}/${monthKey}.json`, { cache: 'no-store' })
+    fetchFresh(`${DAILY_BYTES_BASE}/${monthKey}.json`)
       .then((res) => {
         if (!res.ok) {
           if (res.status === 404 || res.status === 403) return { bytes: [] }
@@ -176,7 +177,7 @@ function DailyBytesMonthRepair() {
       return next
     })
     try {
-      const res = await fetch(`${DAILY_BYTES_BASE}/${dateDMY}.json`, { cache: 'no-store' })
+      const res = await fetchFresh(`${DAILY_BYTES_BASE}/${dateDMY}.json`)
       if (!res.ok) throw new Error(`No day file found (${res.status})`)
       const dayJson = await res.json()
 

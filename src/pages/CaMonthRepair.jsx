@@ -4,6 +4,7 @@ import { MONTH_NAMES, dayOfMonthFromDMY } from '../utils/dailyBytesPublish'
 import { dmyForDay, monthKeyFor, patchMonthEntry } from '../utils/monthRepair'
 import { findFormatIssues, findIdConflicts, validateCaQuestionEntry, validateCasEntry } from '../utils/monthRepairValidate'
 import { buildMonthZipBytes } from '../utils/caPublish'
+import { fetchFresh } from '../utils/freshFetch'
 import { bytesToBase64 } from '../utils/zip'
 import MonthCalendarGrid from '../components/MonthCalendarGrid'
 import DataCheckAlerts from '../components/DataCheckAlerts'
@@ -50,7 +51,7 @@ function CaMonthRepair() {
     setRootError('')
     setRootLoading(true)
     try {
-      const res = await fetch(CA_ROOT_URL, { cache: 'no-store' })
+      const res = await fetchFresh(CA_ROOT_URL)
       if (!res.ok) throw new Error(`Failed to load root.json (${res.status})`)
       setRoot(await res.json())
     } catch (err) {
@@ -72,7 +73,7 @@ function CaMonthRepair() {
     setPublishResults(null)
     setMonthLoading(true)
 
-    fetch(`${CURRENT_AFFAIRS_BASE}/${monthKey}.json`, { cache: 'no-store' })
+    fetchFresh(`${CURRENT_AFFAIRS_BASE}/${monthKey}.json`)
       .then((res) => {
         if (!res.ok) {
           if (res.status === 404 || res.status === 403) return { cas: [], questions: [] }
@@ -169,7 +170,7 @@ function CaMonthRepair() {
       return next
     })
     try {
-      const res = await fetch(`${CURRENT_AFFAIRS_BASE}/${dateDMY}.json`, { cache: 'no-store' })
+      const res = await fetchFresh(`${CURRENT_AFFAIRS_BASE}/${dateDMY}.json`)
       if (!res.ok) throw new Error(`No day file found (${res.status})`)
       const dayJson = await res.json()
 

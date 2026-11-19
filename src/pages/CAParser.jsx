@@ -10,6 +10,7 @@ import {
   WORKER_URL,
 } from '../config/api'
 import { downloadBlob } from '../utils/download'
+import { fetchFresh } from '../utils/freshFetch'
 import { createZip, bytesToBase64, extractFirstFileFromZip } from '../utils/zip'
 import { isoToDMY, mergeMonthJson, monthKeyFromDMY } from '../utils/dailyBytesPublish'
 import { buildSheetCsvUrl, parseCaSheet } from '../utils/caSheetParser'
@@ -77,8 +78,8 @@ function CAParser() {
     setCurrentError('')
     try {
       const [rootRes, verRes] = await Promise.all([
-        fetch(ROOT_URL, { cache: 'no-store' }),
-        fetch(VER_FILE_URL, { cache: 'no-store' }),
+        fetchFresh(ROOT_URL),
+        fetchFresh(VER_FILE_URL),
       ])
       if (!rootRes.ok) throw new Error(`Failed to load root.json (${rootRes.status})`)
       if (!verRes.ok) throw new Error(`Failed to load ver.json (${verRes.status})`)
@@ -165,7 +166,7 @@ function CAParser() {
     setCaRootError('')
     setCaRootLoading(true)
     try {
-      const res = await fetch(CA_ROOT_URL, { cache: 'no-store' })
+      const res = await fetchFresh(CA_ROOT_URL)
       if (!res.ok) throw new Error(`Failed to load root.json (${res.status})`)
       setCaRoot(await res.json())
     } catch (err) {
@@ -224,7 +225,7 @@ function CAParser() {
     if (!genMonthKey) return
     setRemoteMonthError('')
     setRemoteMonthLoading(true)
-    fetch(`${CURRENT_AFFAIRS_BASE}/${genMonthKey}.json`, { cache: 'no-store' })
+    fetchFresh(`${CURRENT_AFFAIRS_BASE}/${genMonthKey}.json`)
       .then((res) => {
         if (!res.ok) {
           if (res.status === 404 || res.status === 403) return { questions: [] }
@@ -244,7 +245,7 @@ function CAParser() {
     setCaGameRootError('')
     setCaGameRootLoading(true)
     try {
-      const res = await fetch(CA_GAME_ROOT_URL, { cache: 'no-store' })
+      const res = await fetchFresh(CA_GAME_ROOT_URL)
       if (!res.ok) throw new Error(`Failed to load root.json (${res.status})`)
       setCaGameRoot(await res.json())
     } catch (err) {
@@ -264,7 +265,7 @@ function CAParser() {
     if (!genMonthKey) return
     setCaGameMonthError('')
     setCaGameMonthLoading(true)
-    fetch(`${CA_GAME_BASE}/${genMonthKey}.zip`, { cache: 'no-store' })
+    fetchFresh(`${CA_GAME_BASE}/${genMonthKey}.zip`)
       .then(async (res) => {
         if (!res.ok) {
           if (res.status === 404 || res.status === 403) return { cas: [], questions: [] }
