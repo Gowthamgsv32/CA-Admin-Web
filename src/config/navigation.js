@@ -6,4 +6,5 @@ export const navItems = [
   { to: '/recall-game-parser', label: 'Recall Game Parser', icon: 'game' },
   { to: '/tnpsc-parser', label: 'TNPSC Parser', icon: 'graduation' },
   { to: '/ca-qb-parser', label: 'CA QB Parser', icon: 'help-circle' },
+  { to: '/ca-translate', label: 'CA Translate', icon: 'globe' },
 ]
