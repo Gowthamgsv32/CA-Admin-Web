@@ -136,12 +136,24 @@ function CaMonthRepair() {
   const preview = useMemo(() => {
     if (!root || !monthJson || !versionOverride.trim()) return null
 
-    const desc = `${monthJson.cas.length} Current Affairs, ${monthJson.questions.length} Questions`
+    const ver = versionOverride.trim()
+    // Every cas row carries its own "ver" (stamped from whatever the av_mos
+    // entry's version was at the time it was generated) — re-stamp all of
+    // them to the edited version so the content stays in sync with
+    // root.json instead of showing whatever stale per-row value they had
+    // when first generated.
+    const contentVer = Number(ver) * 1000
+    const restampedMonthJson = {
+      cas: monthJson.cas.map((c) => ({ ...c, ver: contentVer })),
+      questions: monthJson.questions,
+    }
+
+    const desc = `${restampedMonthJson.cas.length} Current Affairs, ${restampedMonthJson.questions.length} Questions`
     const { root: patchedRoot } = patchMonthEntry(root, {
       arrayKey: 'av_mos',
       monthKey,
       desc,
-      ver: versionOverride.trim(),
+      ver,
       buildNewEntry: () => ({
         title: `${MONTH_NAMES[month - 1]} Current Affairs`,
         desc,
@@ -154,7 +166,7 @@ function CaMonthRepair() {
 
     return {
       rootText: JSON.stringify(patchedRoot, null, 2),
-      monthText: JSON.stringify(monthJson, null, 2),
+      monthText: JSON.stringify(restampedMonthJson, null, 2),
     }
   }, [root, monthJson, versionOverride, monthKey, month])
 
