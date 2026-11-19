@@ -3,6 +3,7 @@ import { CA_GAME_BASE, CA_GAME_QB_ROOT_URL, WORKER_URL } from '../config/api'
 import { MONTH_NAMES } from '../utils/dailyBytesPublish'
 import { dmyForDay, monthKeyFor, patchMonthEntry } from '../utils/monthRepair'
 import { findFormatIssues, findIdConflicts, validateQbQuestionEntry } from '../utils/monthRepairValidate'
+import { fetchFresh } from '../utils/freshFetch'
 import { bytesToBase64, createZip, extractFirstFileFromZip } from '../utils/zip'
 import MonthCalendarGrid from '../components/MonthCalendarGrid'
 import DataCheckAlerts from '../components/DataCheckAlerts'
@@ -28,7 +29,7 @@ function zipFileFromArray(monthKey, arr) {
 }
 
 async function fetchAndExtractZip(url) {
-  const res = await fetch(url, { cache: 'no-store' })
+  const res = await fetchFresh(url)
   if (!res.ok) {
     const err = new Error(`Request failed (${res.status})`)
     err.status = res.status
@@ -59,8 +60,8 @@ function CaQbMonthRepair() {
 
   const [versionOverride, setVersionOverride] = useState('')
 
-  const [generated, setGenerated] = useState(null) // { rootText, monthText }
-  const [generateError, setGenerateError] = useState('')
+  const [rootText, setRootText] = useState('')
+  const [monthText, setMonthText] = useState('')
 
   const [publishing, setPublishing] = useState(false)
   const [publishResults, setPublishResults] = useState(null)
@@ -73,7 +74,7 @@ function CaQbMonthRepair() {
     setRootError('')
     setRootLoading(true)
     try {
-      const res = await fetch(CA_GAME_QB_ROOT_URL, { cache: 'no-store' })
+      const res = await fetchFresh(CA_GAME_QB_ROOT_URL)
       if (!res.ok) throw new Error(`Failed to load gameRoot.json (${res.status})`)
       setRoot(await res.json())
     } catch (err) {
@@ -92,7 +93,6 @@ function CaQbMonthRepair() {
     setQuestions(null)
     setDayErrors({})
     setConflicts([])
-    setGenerated(null)
     setPublishResults(null)
     setMonthLoading(true)
 
@@ -139,6 +139,47 @@ function CaQbMonthRepair() {
     return findFormatIssues(questions, 'qid', validateQbQuestionEntry)
   }, [questions])
 
+  // Recomputed live from root/questions/the edited version — so changing
+  // the version (or fetching another day) always shows up here immediately
+  // instead of requiring a separate "Generate" step that could silently go
+  // stale and get published anyway.
+  const preview = useMemo(() => {
+    if (!root || !questions || !versionOverride.trim()) return null
+
+    const ver = versionOverride.trim()
+    const desc = `${questions.length} questions`
+    const { root: patchedRoot } = patchMonthEntry(root, {
+      arrayKey: 'downloads',
+      monthKey,
+      desc,
+      ver,
+      buildNewEntry: () => ({
+        title: `${MONTH_NAMES[month - 1]} Monthly Game`,
+        desc,
+        zip_url: `${CA_GAME_BASE}/${monthKey}.zip`,
+        status: false,
+        month: monthKey,
+        type: 'MONTHLY',
+      }),
+    })
+
+    return {
+      rootText: JSON.stringify(patchedRoot, null, 2),
+      monthText: JSON.stringify(questions, null, 2),
+    }
+  }, [root, questions, versionOverride, monthKey, month])
+
+  // Mirrors the live preview into the editable textareas whenever it
+  // actually changes (version edited, a day fetched, root reloaded) — a
+  // hand-edit to the textarea itself doesn't re-trigger this, so manual
+  // tweaks survive until the next real input change.
+  useEffect(() => {
+    if (preview) {
+      setRootText(preview.rootText)
+      setMonthText(preview.monthText)
+    }
+  }, [preview])
+
   async function handleFetchDay(day) {
     const dateDMY = dmyForDay(day, month, year)
     setFetchingDay(day)
@@ -166,43 +207,6 @@ function CaQbMonthRepair() {
     }
   }
 
-  function handleGenerate() {
-    setGenerateError('')
-    setGenerated(null)
-    setPublishResults(null)
-
-    if (!root || !questions) {
-      setGenerateError('Load gameRoot.json and the month data first.')
-      return
-    }
-    if (!versionOverride.trim()) {
-      setGenerateError('Enter a version for this month.')
-      return
-    }
-
-    const ver = versionOverride.trim()
-    const desc = `${questions.length} questions`
-    const { root: patchedRoot } = patchMonthEntry(root, {
-      arrayKey: 'downloads',
-      monthKey,
-      desc,
-      ver,
-      buildNewEntry: () => ({
-        title: `${MONTH_NAMES[month - 1]} Monthly Game`,
-        desc,
-        zip_url: `${CA_GAME_BASE}/${monthKey}.zip`,
-        status: false,
-        month: monthKey,
-        type: 'MONTHLY',
-      }),
-    })
-
-    setGenerated({
-      rootText: JSON.stringify(patchedRoot, null, 2),
-      monthText: JSON.stringify(questions, null, 2),
-    })
-  }
-
   async function handlePublish() {
     setPublishError('')
     setPublishResults(null)
@@ -211,8 +215,8 @@ function CaQbMonthRepair() {
     let nextRoot
     let nextQuestions
     try {
-      nextRoot = JSON.parse(generated.rootText)
-      nextQuestions = JSON.parse(generated.monthText)
+      nextRoot = JSON.parse(rootText)
+      nextQuestions = JSON.parse(monthText)
       if (!Array.isArray(nextQuestions)) throw new Error('Month JSON must be an array.')
     } catch (err) {
       setPublishError(`Invalid JSON: ${err.message}`)
@@ -336,28 +340,21 @@ function CaQbMonthRepair() {
 
       {questions && (
         <section className="form-card">
-          <h3>Generate</h3>
+          <h3>Month version</h3>
           <div className="form-grid">
             <label className="field">
               <span>Month version (downloads ver)</span>
               <input type="text" value={versionOverride} onChange={(e) => setVersionOverride(e.target.value)} />
               <span className="field-hint">
-                {existingEntry ? `Currently ${existingEntry.ver}` : 'No existing entry — will be created'}
+                {existingEntry ? `Currently ${existingEntry.ver}` : 'No existing entry — will be created'} — the
+                preview below updates automatically as you change this.
               </span>
             </label>
-          </div>
-
-          {generateError && <div className="alert alert-error">{generateError}</div>}
-
-          <div className="form-actions">
-            <button type="button" className="btn btn-primary" onClick={handleGenerate}>
-              Generate New JSON
-            </button>
           </div>
         </section>
       )}
 
-      {generated && (
+      {preview && (
         <section className="result-card">
           <div className="result-toolbar">
             <h3>Review before publish</h3>
@@ -395,8 +392,8 @@ function CaQbMonthRepair() {
               <textarea
                 className="textarea-mono"
                 rows={12}
-                value={generated.rootText}
-                onChange={(e) => setGenerated((prev) => ({ ...prev, rootText: e.target.value }))}
+                value={rootText}
+                onChange={(e) => setRootText(e.target.value)}
               />
             </label>
           </div>
@@ -406,8 +403,8 @@ function CaQbMonthRepair() {
               <textarea
                 className="textarea-mono"
                 rows={16}
-                value={generated.monthText}
-                onChange={(e) => setGenerated((prev) => ({ ...prev, monthText: e.target.value }))}
+                value={monthText}
+                onChange={(e) => setMonthText(e.target.value)}
               />
             </label>
           </div>

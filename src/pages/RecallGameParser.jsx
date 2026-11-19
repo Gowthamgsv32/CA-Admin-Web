@@ -12,6 +12,7 @@ import { buildNextRecallRoot, mergeTopicsMonthJson } from '../utils/recallGamePu
 import { mergeUsedArticleIds } from '../utils/recallGameUsage'
 import { bytesToBase64, createZip } from '../utils/zip'
 import { downloadBlob } from '../utils/download'
+import { fetchFresh } from '../utils/freshFetch'
 import MultiSelectDropdown from '../components/MultiSelectDropdown'
 
 function zipFileFromMonthJson(monthKey, monthJson) {
@@ -106,7 +107,7 @@ function RecallGameParser() {
     setError('')
     setCasData(null)
 
-    fetch(url, { cache: 'no-store' })
+    fetchFresh(url)
       .then((res) => {
         if (!res.ok) throw new Error(`No data found for ${month}-${year} (${res.status})`)
         return res.json()
@@ -139,8 +140,8 @@ function RecallGameParser() {
     setRecallRootError('')
     try {
       const [rootRes, usedRes] = await Promise.all([
-        fetch(RECALL_GAME_ROOT_URL, { cache: 'no-store' }),
-        fetch(RECALL_GAME_USED_ARTICLES_URL, { cache: 'no-store' }),
+        fetchFresh(RECALL_GAME_ROOT_URL),
+        fetchFresh(RECALL_GAME_USED_ARTICLES_URL),
       ])
 
       if (!rootRes.ok) throw new Error(`Failed to load recall-root.json (${rootRes.status})`)
@@ -273,7 +274,7 @@ function RecallGameParser() {
       const dayTopicsJson = buildTopicsJson({ dateDMY, ver: nextVer, generatedList })
 
       let serverMonthJson = null
-      const monthRes = await fetch(`${RECALL_GAME_BASE}/${dayMonthKey}.json`, { cache: 'no-store' })
+      const monthRes = await fetchFresh(`${RECALL_GAME_BASE}/${dayMonthKey}.json`)
       if (monthRes.ok) {
         serverMonthJson = await monthRes.json()
       } else if (monthRes.status !== 404 && monthRes.status !== 403) {

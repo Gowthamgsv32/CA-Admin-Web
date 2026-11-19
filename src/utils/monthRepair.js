@@ -24,6 +24,19 @@ export function monthKeyFor(month, year) {
   return `${pad2(month)}-${year}`
 }
 
+// A CA question's qid is "<DDMMYYYY date digits><running sequence>", but
+// CAParser.jsx stamps it via Number(...), which drops the date digits'
+// leading zero for days 1-9 — so matching a qid back to its day has to
+// mirror that same Number() coercion rather than just slicing characters.
+export function dayFromCaQid(qid, month, year, totalDays) {
+  const qidStr = String(qid)
+  for (let d = 1; d <= totalDays; d++) {
+    const prefix = String(Number(dmyForDay(d, month, year).replace(/-/g, '')))
+    if (qidStr.startsWith(prefix)) return d
+  }
+  return null
+}
+
 // Generic av_mos/downloads-style month-entry patch, shared by every Month
 // Repair screen: updates (or creates) just the one entry for this month,
 // leaving every other root.json field — including the top-level ver/date,

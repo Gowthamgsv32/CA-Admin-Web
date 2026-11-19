@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { CA_ROOT_URL, CURRENT_AFFAIRS_BASE, WORKER_URL } from '../config/api'
 import { MONTH_NAMES, dayOfMonthFromDMY } from '../utils/dailyBytesPublish'
-import { dmyForDay, monthKeyFor, patchMonthEntry } from '../utils/monthRepair'
+import { daysInMonth, dayFromCaQid, dmyForDay, monthKeyFor, patchMonthEntry } from '../utils/monthRepair'
 import { findFormatIssues, findIdConflicts, validateCaQuestionEntry, validateCasEntry } from '../utils/monthRepairValidate'
 import { buildMonthZipBytes } from '../utils/caPublish'
+import { fetchFresh } from '../utils/freshFetch'
 import { bytesToBase64 } from '../utils/zip'
 import MonthCalendarGrid from '../components/MonthCalendarGrid'
 import DataCheckAlerts from '../components/DataCheckAlerts'
@@ -36,8 +37,8 @@ function CaMonthRepair() {
 
   const [versionOverride, setVersionOverride] = useState('')
 
-  const [generated, setGenerated] = useState(null) // { rootText, monthText }
-  const [generateError, setGenerateError] = useState('')
+  const [rootText, setRootText] = useState('')
+  const [monthText, setMonthText] = useState('')
 
   const [publishing, setPublishing] = useState(false)
   const [publishResults, setPublishResults] = useState(null)
@@ -50,7 +51,7 @@ function CaMonthRepair() {
     setRootError('')
     setRootLoading(true)
     try {
-      const res = await fetch(CA_ROOT_URL, { cache: 'no-store' })
+      const res = await fetchFresh(CA_ROOT_URL)
       if (!res.ok) throw new Error(`Failed to load root.json (${res.status})`)
       setRoot(await res.json())
     } catch (err) {
@@ -69,11 +70,10 @@ function CaMonthRepair() {
     setMonthJson(null)
     setDayErrors({})
     setConflicts([])
-    setGenerated(null)
     setPublishResults(null)
     setMonthLoading(true)
 
-    fetch(`${CURRENT_AFFAIRS_BASE}/${monthKey}.json`, { cache: 'no-store' })
+    fetchFresh(`${CURRENT_AFFAIRS_BASE}/${monthKey}.json`)
       .then((res) => {
         if (!res.ok) {
           if (res.status === 404 || res.status === 403) return { cas: [], questions: [] }
@@ -94,11 +94,19 @@ function CaMonthRepair() {
 
   const dayInfo = useMemo(() => {
     const map = new Map()
+    const totalDays = daysInMonth(month, year)
     if (monthJson) {
       for (const c of monthJson.cas) {
         const d = dayOfMonthFromDMY(c.date)
-        const prev = map.get(d) || { present: true, count: 0 }
-        prev.count += 1
+        const prev = map.get(d) || { present: true, casCount: 0, qCount: 0 }
+        prev.casCount += 1
+        map.set(d, prev)
+      }
+      for (const q of monthJson.questions) {
+        const d = dayFromCaQid(q.qid, month, year, totalDays)
+        if (!d) continue
+        const prev = map.get(d) || { present: true, casCount: 0, qCount: 0 }
+        prev.qCount += 1
         map.set(d, prev)
       }
     }
@@ -108,10 +116,10 @@ function CaMonthRepair() {
       map.set(d, { ...prev, error: message })
     }
     for (const [d, info] of map) {
-      if (info.present) map.set(d, { ...info, label: `${info.count} cas` })
+      if (info.present) map.set(d, { ...info, label: `${info.casCount || 0} cas · ${info.qCount || 0} q` })
     }
     return map
-  }, [monthJson, dayErrors])
+  }, [monthJson, dayErrors, month, year])
 
   const formatIssues = useMemo(() => {
     if (!monthJson) return []
@@ -120,6 +128,46 @@ function CaMonthRepair() {
       ...findFormatIssues(monthJson.questions, 'qid', validateCaQuestionEntry),
     ]
   }, [monthJson])
+
+  // Recomputed live from root/monthJson/the edited version — so changing
+  // the version (or fetching another day) always shows up here immediately
+  // instead of requiring a separate "Generate" step that could silently go
+  // stale and get published anyway.
+  const preview = useMemo(() => {
+    if (!root || !monthJson || !versionOverride.trim()) return null
+
+    const desc = `${monthJson.cas.length} Current Affairs, ${monthJson.questions.length} Questions`
+    const { root: patchedRoot } = patchMonthEntry(root, {
+      arrayKey: 'av_mos',
+      monthKey,
+      desc,
+      ver: versionOverride.trim(),
+      buildNewEntry: () => ({
+        title: `${MONTH_NAMES[month - 1]} Current Affairs`,
+        desc,
+        url: `${CURRENT_AFFAIRS_BASE}/${monthKey}.json`,
+        zip_url: `${CURRENT_AFFAIRS_BASE}/${monthKey}.zip`,
+        status: false,
+        month: monthKey,
+      }),
+    })
+
+    return {
+      rootText: JSON.stringify(patchedRoot, null, 2),
+      monthText: JSON.stringify(monthJson, null, 2),
+    }
+  }, [root, monthJson, versionOverride, monthKey, month])
+
+  // Mirrors the live preview into the editable textareas whenever it
+  // actually changes (version edited, a day fetched, root reloaded) — a
+  // hand-edit to the textarea itself doesn't re-trigger this, so manual
+  // tweaks survive until the next real input change.
+  useEffect(() => {
+    if (preview) {
+      setRootText(preview.rootText)
+      setMonthText(preview.monthText)
+    }
+  }, [preview])
 
   async function handleFetchDay(day) {
     const dateDMY = dmyForDay(day, month, year)
@@ -130,7 +178,7 @@ function CaMonthRepair() {
       return next
     })
     try {
-      const res = await fetch(`${CURRENT_AFFAIRS_BASE}/${dateDMY}.json`, { cache: 'no-store' })
+      const res = await fetchFresh(`${CURRENT_AFFAIRS_BASE}/${dateDMY}.json`)
       if (!res.ok) throw new Error(`No day file found (${res.status})`)
       const dayJson = await res.json()
 
@@ -159,42 +207,6 @@ function CaMonthRepair() {
     }
   }
 
-  function handleGenerate() {
-    setGenerateError('')
-    setGenerated(null)
-    setPublishResults(null)
-
-    if (!root || !monthJson) {
-      setGenerateError('Load root.json and the month data first.')
-      return
-    }
-    if (!versionOverride.trim()) {
-      setGenerateError('Enter a version for this month.')
-      return
-    }
-
-    const desc = `${monthJson.cas.length} Current Affairs, ${monthJson.questions.length} Questions`
-    const { root: patchedRoot } = patchMonthEntry(root, {
-      arrayKey: 'av_mos',
-      monthKey,
-      desc,
-      ver: versionOverride.trim(),
-      buildNewEntry: () => ({
-        title: `${MONTH_NAMES[month - 1]} Current Affairs`,
-        desc,
-        url: `${CURRENT_AFFAIRS_BASE}/${monthKey}.json`,
-        zip_url: `${CURRENT_AFFAIRS_BASE}/${monthKey}.zip`,
-        status: false,
-        month: monthKey,
-      }),
-    })
-
-    setGenerated({
-      rootText: JSON.stringify(patchedRoot, null, 2),
-      monthText: JSON.stringify(monthJson, null, 2),
-    })
-  }
-
   async function handlePublish() {
     setPublishError('')
     setPublishResults(null)
@@ -203,8 +215,8 @@ function CaMonthRepair() {
     let nextRoot
     let nextMonthJson
     try {
-      nextRoot = JSON.parse(generated.rootText)
-      nextMonthJson = JSON.parse(generated.monthText)
+      nextRoot = JSON.parse(rootText)
+      nextMonthJson = JSON.parse(monthText)
     } catch (err) {
       setPublishError(`Invalid JSON: ${err.message}`)
       return
@@ -334,28 +346,21 @@ function CaMonthRepair() {
 
       {monthJson && (
         <section className="form-card">
-          <h3>Generate</h3>
+          <h3>Month version</h3>
           <div className="form-grid">
             <label className="field">
               <span>Month version (av_mos ver)</span>
               <input type="text" value={versionOverride} onChange={(e) => setVersionOverride(e.target.value)} />
               <span className="field-hint">
-                {existingEntry ? `Currently ${existingEntry.ver}` : 'No existing entry — will be created'}
+                {existingEntry ? `Currently ${existingEntry.ver}` : 'No existing entry — will be created'} — the
+                preview below updates automatically as you change this.
               </span>
             </label>
-          </div>
-
-          {generateError && <div className="alert alert-error">{generateError}</div>}
-
-          <div className="form-actions">
-            <button type="button" className="btn btn-primary" onClick={handleGenerate}>
-              Generate New JSON
-            </button>
           </div>
         </section>
       )}
 
-      {generated && (
+      {preview && (
         <section className="result-card">
           <div className="result-toolbar">
             <h3>Review before publish</h3>
@@ -393,8 +398,8 @@ function CaMonthRepair() {
               <textarea
                 className="textarea-mono"
                 rows={12}
-                value={generated.rootText}
-                onChange={(e) => setGenerated((prev) => ({ ...prev, rootText: e.target.value }))}
+                value={rootText}
+                onChange={(e) => setRootText(e.target.value)}
               />
             </label>
           </div>
@@ -404,8 +409,8 @@ function CaMonthRepair() {
               <textarea
                 className="textarea-mono"
                 rows={16}
-                value={generated.monthText}
-                onChange={(e) => setGenerated((prev) => ({ ...prev, monthText: e.target.value }))}
+                value={monthText}
+                onChange={(e) => setMonthText(e.target.value)}
               />
             </label>
           </div>

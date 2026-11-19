@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { CA_GAME_BASE, CA_GAME_QB_ROOT_URL, CURRENT_AFFAIRS_BASE, WORKER_URL } from '../config/api'
 import { isoToDMY, monthKeyFromDMY } from '../utils/dailyBytesPublish'
 import { downloadBlob } from '../utils/download'
+import { fetchFresh } from '../utils/freshFetch'
 import { buildNextGameRoot } from '../utils/caPublish'
 import { bytesToBase64, createZip, extractFirstFileFromZip } from '../utils/zip'
 
@@ -86,7 +87,7 @@ function CaQbParser() {
 
     setDayLoading(true)
     try {
-      const res = await fetch(`${CURRENT_AFFAIRS_BASE}/${dateDMY}.json`, { cache: 'no-store' })
+      const res = await fetchFresh(`${CURRENT_AFFAIRS_BASE}/${dateDMY}.json`)
       if (!res.ok) throw new Error(`No current affairs found for ${dateDMY} (${res.status})`)
       const data = await res.json()
       if (!Array.isArray(data.cas) || data.cas.length === 0) {
@@ -201,7 +202,7 @@ function CaQbParser() {
     setGameRootError('')
     setGameRootLoading(true)
     try {
-      const res = await fetch(CA_GAME_QB_ROOT_URL, { cache: 'no-store' })
+      const res = await fetchFresh(CA_GAME_QB_ROOT_URL)
       if (!res.ok) throw new Error(`Failed to load gameRoot.json (${res.status})`)
       setGameRoot(await res.json())
     } catch (err) {
@@ -225,7 +226,7 @@ function CaQbParser() {
     if (!monthKey) return
     setGameMonthError('')
     setGameMonthLoading(true)
-    fetch(`${CA_GAME_BASE}/${monthKey}.zip`, { cache: 'no-store' })
+    fetchFresh(`${CA_GAME_BASE}/${monthKey}.zip`)
       .then(async (res) => {
         if (!res.ok) {
           if (res.status === 404 || res.status === 403) return []
