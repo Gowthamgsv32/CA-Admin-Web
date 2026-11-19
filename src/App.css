@@ -993,6 +993,22 @@
   .content {
     padding: 20px;
   }
+
+  .month-calendar-weekdays,
+  .month-calendar-grid {
+    grid-template-columns: repeat(7, minmax(40px, 1fr));
+    min-width: 340px;
+  }
+
+  .month-calendar-cell {
+    min-height: 54px;
+    padding: 6px;
+  }
+
+  .month-calendar-fetch-btn {
+    font-size: 10px;
+    padding: 3px 6px;
+  }
 }
 
 /* Month Repair calendar grid */
@@ -1002,11 +1018,23 @@
   gap: 8px;
 }
 
+/* .result-card (the calendar's usual container) clips overflow, so the
+   horizontal scroll region has to live in here, inside that boundary, with
+   -webkit-overflow-scrolling for smooth scrolling on iOS — otherwise a
+   phone-width viewport just silently clips the Fri/Sat columns instead of
+   letting you scroll to them. */
+.month-calendar-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 4px;
+}
+
 .month-calendar-weekdays,
 .month-calendar-grid {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(7, minmax(44px, 1fr));
   gap: 6px;
+  min-width: 420px;
 }
 
 .month-calendar-weekday {
