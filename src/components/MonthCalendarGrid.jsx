@@ -15,57 +15,59 @@ function MonthCalendarGrid({ month, year, dayInfo, fetchingDay, onFetchDay }) {
 
   return (
     <div className="month-calendar">
-      <div className="month-calendar-weekdays">
-        {WEEKDAYS.map((w) => (
-          <div key={w} className="month-calendar-weekday">
-            {w}
-          </div>
-        ))}
-      </div>
-      <div className="month-calendar-grid">
-        {cells.map((d, i) => {
-          if (d === null) return <div key={`blank-${i}`} className="month-calendar-cell month-calendar-cell--blank" />
+      <div className="month-calendar-scroll">
+        <div className="month-calendar-weekdays">
+          {WEEKDAYS.map((w) => (
+            <div key={w} className="month-calendar-weekday">
+              {w}
+            </div>
+          ))}
+        </div>
+        <div className="month-calendar-grid">
+          {cells.map((d, i) => {
+            if (d === null) return <div key={`blank-${i}`} className="month-calendar-cell month-calendar-cell--blank" />
 
-          const info = dayInfo.get(d) || { present: false }
-          const isFetching = fetchingDay === d
+            const info = dayInfo.get(d) || { present: false }
+            const isFetching = fetchingDay === d
 
-          return (
-            <div
-              key={d}
-              className={`month-calendar-cell${info.present ? ' month-calendar-cell--present' : ' month-calendar-cell--missing'}`}
-            >
-              <span className="month-calendar-day">{d}</span>
-              {info.present ? (
-                <span className="month-calendar-present-row">
-                  <span className="month-calendar-label">{info.label || 'Present'}</span>
+            return (
+              <div
+                key={d}
+                className={`month-calendar-cell${info.present ? ' month-calendar-cell--present' : ' month-calendar-cell--missing'}`}
+              >
+                <span className="month-calendar-day">{d}</span>
+                {info.present ? (
+                  <span className="month-calendar-present-row">
+                    <span className="month-calendar-label">{info.label || 'Present'}</span>
+                    <button
+                      type="button"
+                      className="month-calendar-refetch-btn"
+                      onClick={() => onFetchDay(d)}
+                      disabled={isFetching}
+                      title="Re-fetch this day from the server"
+                    >
+                      {isFetching ? '…' : '↻'}
+                    </button>
+                  </span>
+                ) : (
                   <button
                     type="button"
-                    className="month-calendar-refetch-btn"
+                    className="month-calendar-fetch-btn"
                     onClick={() => onFetchDay(d)}
                     disabled={isFetching}
-                    title="Re-fetch this day from the server"
                   >
-                    {isFetching ? '…' : '↻'}
+                    {isFetching ? '…' : 'Fetch'}
                   </button>
-                </span>
-              ) : (
-                <button
-                  type="button"
-                  className="month-calendar-fetch-btn"
-                  onClick={() => onFetchDay(d)}
-                  disabled={isFetching}
-                >
-                  {isFetching ? '…' : 'Fetch'}
-                </button>
-              )}
-              {info.error && (
-                <span className="month-calendar-error-dot" title={info.error}>
-                  !
-                </span>
-              )}
-            </div>
-          )
-        })}
+                )}
+                {info.error && (
+                  <span className="month-calendar-error-dot" title={info.error}>
+                    !
+                  </span>
+                )}
+              </div>
+            )
+          })}
+        </div>
       </div>
     </div>
   )
