@@ -8,6 +8,7 @@ import { buildTnpscPrompt } from './tnpscPrompts.js'
 import { buildCaQuestionPrompt } from './caQuestionPrompts.js'
 import { buildCaQbPrompt } from './caQbPrompts.js'
 import { normalizeAndValidateCaQb } from './caQbValidate.js'
+import { runCaTranslate } from './caTranslate.js'
 
 const HTML_BUILDERS = {
   spoken: buildResultHtml,
@@ -475,6 +476,32 @@ async function handlePurgeCdn(request, env) {
   }
 }
 
+// CA Translate: fills in missing Tamil/Hindi/Malayalam title+desc cells for
+// a tab (or just one date within it), writing straight back into the
+// Google Sheet. Needs a Google service account (Sheets write + Translate
+// scopes) rather than just the read-only API key the tab-listing endpoint
+// uses, since writing cells requires OAuth.
+async function handleCaTranslate(request, env) {
+  const { sheetId, tabName, mode, date } = await request.json()
+
+  if (!sheetId || !tabName) {
+    return json(env, { error: 'Missing sheetId or tabName.' }, 400)
+  }
+  if (mode !== 'day' && mode !== 'tab') {
+    return json(env, { error: 'mode must be "day" or "tab".' }, 400)
+  }
+  if (mode === 'day' && !date) {
+    return json(env, { error: 'A date is required for "day" mode.' }, 400)
+  }
+
+  try {
+    const result = await runCaTranslate(env, { sheetId, tabName, mode, date })
+    return json(env, result)
+  } catch (err) {
+    return json(env, { error: err.message }, 502)
+  }
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') {
@@ -510,6 +537,9 @@ export default {
       }
       if (request.method === 'POST' && url.pathname === '/purge-cdn') {
         return await handlePurgeCdn(request, env)
+      }
+      if (request.method === 'POST' && url.pathname === '/ca-translate') {
+        return await handleCaTranslate(request, env)
       }
       return json(env, { error: 'Not found' }, 404)
     } catch (err) {

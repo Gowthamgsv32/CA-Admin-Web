@@ -1594,6 +1594,193 @@ function normalizeAndValidateCaQb(rawData) {
   return { data, errors }
 }
 
+// ---- googleServiceAccount.js ----
+const GOOGLE_SERVICE_ACCOUNT_SCOPES =
+  'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/cloud-translation'
+const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
+
+function base64UrlFromBytes(bytes) {
+  let binary = ''
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+function base64UrlFromString(str) {
+  return base64UrlFromBytes(new TextEncoder().encode(str))
+}
+
+function pemToDer(pem) {
+  const normalized = pem.replace(/\\n/g, '\n')
+  const base64Body = normalized
+    .replace(/-----BEGIN [^-]+-----/, '')
+    .replace(/-----END [^-]+-----/, '')
+    .replace(/\s+/g, '')
+  const binary = atob(base64Body)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  return bytes
+}
+
+async function importSigningKey(privateKeyPem) {
+  const der = pemToDer(privateKeyPem)
+  return crypto.subtle.importKey('pkcs8', der, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign'])
+}
+
+async function getGoogleAccessToken(env) {
+  const email = env.GOOGLE_SERVICE_ACCOUNT_EMAIL
+  const privateKey = env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY
+  if (!email || !privateKey) {
+    throw new Error(
+      'Google service account not configured (GOOGLE_SERVICE_ACCOUNT_EMAIL / GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY).'
+    )
+  }
+
+  const now = Math.floor(Date.now() / 1000)
+  const header = { alg: 'RS256', typ: 'JWT' }
+  const claims = { iss: email, scope: GOOGLE_SERVICE_ACCOUNT_SCOPES, aud: GOOGLE_TOKEN_URL, iat: now, exp: now + 3600 }
+  const signingInput = `${base64UrlFromString(JSON.stringify(header))}.${base64UrlFromString(JSON.stringify(claims))}`
+
+  const key = await importSigningKey(privateKey)
+  const signature = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, new TextEncoder().encode(signingInput))
+  const jwt = `${signingInput}.${base64UrlFromBytes(new Uint8Array(signature))}`
+
+  const res = await fetch(GOOGLE_TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion: jwt,
+    }),
+  })
+  const body = await res.json()
+  if (!res.ok) {
+    throw new Error(body.error_description || body.error || `Google token exchange failed (${res.status})`)
+  }
+  return body.access_token
+}
+
+// ---- caTranslate.js ----
+const CA_TRANSLATE_COLS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N']
+const CA_TRANSLATE_COL = {
+  date: 1,
+  titleEn: 2,
+  descEn: 3,
+  titleHi: 7,
+  descHi: 8,
+  titleTa: 10,
+  descTa: 11,
+  titleMl: 12,
+  descMl: 13,
+}
+const CA_TRANSLATE_TARGET_LANGS = [
+  { lang: 'hi', titleCol: CA_TRANSLATE_COL.titleHi, descCol: CA_TRANSLATE_COL.descHi },
+  { lang: 'ta', titleCol: CA_TRANSLATE_COL.titleTa, descCol: CA_TRANSLATE_COL.descTa },
+  { lang: 'ml', titleCol: CA_TRANSLATE_COL.titleMl, descCol: CA_TRANSLATE_COL.descMl },
+]
+
+const CA_TRANSLATE_DATE_PATTERN = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/
+function normalizeTranslateDate(raw) {
+  const match = CA_TRANSLATE_DATE_PATTERN.exec(String(raw || '').trim())
+  if (!match) return null
+  const [, day, month, year] = match
+  return `${day.padStart(2, '0')}-${month.padStart(2, '0')}-${year}`
+}
+
+function escapeSheetName(tabName) {
+  return tabName.replace(/'/g, "''")
+}
+
+function buildTranslationPlan(rows, { mode, date }) {
+  const dataRows = rows.slice(1)
+  const targetDate = mode === 'day' ? normalizeTranslateDate(date) : null
+
+  const queued = { hi: [], ta: [], ml: [] }
+  let rowsInScope = 0
+
+  dataRows.forEach((row, i) => {
+    const sheetRow = i + 2
+    const titleEn = (row[CA_TRANSLATE_COL.titleEn] || '').toString().trim()
+    const descEn = (row[CA_TRANSLATE_COL.descEn] || '').toString().trim()
+    if (!titleEn && !descEn) return
+
+    if (mode === 'day' && normalizeTranslateDate(row[CA_TRANSLATE_COL.date]) !== targetDate) return
+
+    rowsInScope++
+
+    for (const { lang, titleCol, descCol } of CA_TRANSLATE_TARGET_LANGS) {
+      const existingTitle = (row[titleCol] || '').toString().trim()
+      const existingDesc = (row[descCol] || '').toString().trim()
+      if (titleEn && !existingTitle) queued[lang].push({ text: titleEn, cell: `${CA_TRANSLATE_COLS[titleCol]}${sheetRow}` })
+      if (descEn && !existingDesc) queued[lang].push({ text: descEn, cell: `${CA_TRANSLATE_COLS[descCol]}${sheetRow}` })
+    }
+  })
+
+  return { queued, rowsInScope }
+}
+
+async function fetchSheetValues(accessToken, sheetId, tabName) {
+  const range = encodeURIComponent(`'${escapeSheetName(tabName)}'!A1:N5000`)
+  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+  const body = await res.json()
+  if (!res.ok) throw new Error(body.error?.message || `Failed to read the sheet (${res.status})`)
+  return body.values || []
+}
+
+async function translateBatch(accessToken, texts, targetLang) {
+  if (texts.length === 0) return []
+  const CHUNK = 100
+  const results = []
+  for (let i = 0; i < texts.length; i += CHUNK) {
+    const chunk = texts.slice(i, i + CHUNK)
+    const res = await fetch('https://translation.googleapis.com/language/translate/v2', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q: chunk, target: targetLang, source: 'en', format: 'text' }),
+    })
+    const body = await res.json()
+    if (!res.ok) throw new Error(body.error?.message || `Translate API failed for "${targetLang}" (${res.status})`)
+    results.push(...body.data.translations.map((t) => t.translatedText))
+  }
+  return results
+}
+
+async function writeTranslatedCells(accessToken, sheetId, tabName, updates) {
+  if (updates.length === 0) return
+  const sheetName = escapeSheetName(tabName)
+  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchUpdate`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      valueInputOption: 'RAW',
+      data: updates.map((u) => ({ range: `'${sheetName}'!${u.cell}`, values: [[u.text]] })),
+    }),
+  })
+  const body = await res.json()
+  if (!res.ok) throw new Error(body.error?.message || `Failed to write translations back to the sheet (${res.status})`)
+}
+
+async function runCaTranslate(env, { sheetId, tabName, mode, date }) {
+  const accessToken = await getGoogleAccessToken(env)
+  const rows = await fetchSheetValues(accessToken, sheetId, tabName)
+  const { queued, rowsInScope } = buildTranslationPlan(rows, { mode, date })
+
+  const byLanguage = {}
+  const updates = []
+  for (const lang of ['hi', 'ta', 'ml']) {
+    const items = queued[lang]
+    byLanguage[lang] = items.length
+    if (items.length === 0) continue
+    const translated = await translateBatch(accessToken, items.map((it) => it.text), lang)
+    items.forEach((item, idx) => updates.push({ cell: item.cell, text: translated[idx] }))
+  }
+
+  await writeTranslatedCells(accessToken, sheetId, tabName, updates)
+
+  return { rowsScanned: rowsInScope, cellsFilled: updates.length, byLanguage }
+}
+
 // ---- index.js ----
 const HTML_BUILDERS = {
   spoken: buildResultHtml,
@@ -2061,6 +2248,27 @@ async function handlePurgeCdn(request, env) {
   }
 }
 
+async function handleCaTranslate(request, env) {
+  const { sheetId, tabName, mode, date } = await request.json()
+
+  if (!sheetId || !tabName) {
+    return json(env, { error: 'Missing sheetId or tabName.' }, 400)
+  }
+  if (mode !== 'day' && mode !== 'tab') {
+    return json(env, { error: 'mode must be "day" or "tab".' }, 400)
+  }
+  if (mode === 'day' && !date) {
+    return json(env, { error: 'A date is required for "day" mode.' }, 400)
+  }
+
+  try {
+    const result = await runCaTranslate(env, { sheetId, tabName, mode, date })
+    return json(env, result)
+  } catch (err) {
+    return json(env, { error: err.message }, 502)
+  }
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') {
@@ -2096,6 +2304,9 @@ export default {
       }
       if (request.method === 'POST' && url.pathname === '/purge-cdn') {
         return await handlePurgeCdn(request, env)
+      }
+      if (request.method === 'POST' && url.pathname === '/ca-translate') {
+        return await handleCaTranslate(request, env)
       }
       return json(env, { error: 'Not found' }, 404)
     } catch (err) {
