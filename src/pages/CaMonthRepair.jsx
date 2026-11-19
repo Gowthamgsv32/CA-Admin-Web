@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { CA_ROOT_URL, CURRENT_AFFAIRS_BASE, WORKER_URL } from '../config/api'
 import { MONTH_NAMES, dayOfMonthFromDMY } from '../utils/dailyBytesPublish'
-import { dmyForDay, monthKeyFor, patchMonthEntry } from '../utils/monthRepair'
+import { daysInMonth, dayFromCaQid, dmyForDay, monthKeyFor, patchMonthEntry } from '../utils/monthRepair'
 import { findFormatIssues, findIdConflicts, validateCaQuestionEntry, validateCasEntry } from '../utils/monthRepairValidate'
 import { buildMonthZipBytes } from '../utils/caPublish'
 import { fetchFresh } from '../utils/freshFetch'
@@ -94,11 +94,19 @@ function CaMonthRepair() {
 
   const dayInfo = useMemo(() => {
     const map = new Map()
+    const totalDays = daysInMonth(month, year)
     if (monthJson) {
       for (const c of monthJson.cas) {
         const d = dayOfMonthFromDMY(c.date)
-        const prev = map.get(d) || { present: true, count: 0 }
-        prev.count += 1
+        const prev = map.get(d) || { present: true, casCount: 0, qCount: 0 }
+        prev.casCount += 1
+        map.set(d, prev)
+      }
+      for (const q of monthJson.questions) {
+        const d = dayFromCaQid(q.qid, month, year, totalDays)
+        if (!d) continue
+        const prev = map.get(d) || { present: true, casCount: 0, qCount: 0 }
+        prev.qCount += 1
         map.set(d, prev)
       }
     }
@@ -108,10 +116,10 @@ function CaMonthRepair() {
       map.set(d, { ...prev, error: message })
     }
     for (const [d, info] of map) {
-      if (info.present) map.set(d, { ...info, label: `${info.count} cas` })
+      if (info.present) map.set(d, { ...info, label: `${info.casCount || 0} cas · ${info.qCount || 0} q` })
     }
     return map
-  }, [monthJson, dayErrors])
+  }, [monthJson, dayErrors, month, year])
 
   const formatIssues = useMemo(() => {
     if (!monthJson) return []
