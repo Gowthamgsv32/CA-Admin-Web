@@ -57,6 +57,14 @@ const paths = {
       <path d="M12 3c2.5 2.7 4 6 4 9s-1.5 6.3-4 9c-2.5-2.7-4-6-4-9s1.5-6.3 4-9Z" />
     </>
   ),
+  calendar: (
+    <>
+      <rect x="3" y="5" width="18" height="16" rx="2" />
+      <path d="M3 10h18" />
+      <path d="M8 3v4" />
+      <path d="M16 3v4" />
+    </>
+  ),
 }
 
 function Icon({ name, size = 20 }) {
