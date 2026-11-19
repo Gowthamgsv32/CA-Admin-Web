@@ -8,6 +8,10 @@ import CAParser from './pages/CAParser'
 import RecallGameParser from './pages/RecallGameParser'
 import CaQbParser from './pages/CaQbParser'
 import CaTranslateParser from './pages/CaTranslateParser'
+import CaMonthRepair from './pages/CaMonthRepair'
+import DailyBytesMonthRepair from './pages/DailyBytesMonthRepair'
+import RecallGameMonthRepair from './pages/RecallGameMonthRepair'
+import CaQbMonthRepair from './pages/CaQbMonthRepair'
 import './App.css'
 
 // Code-split: pdfjs-dist is heavy and only needed on this one page, so it
@@ -25,6 +29,10 @@ function App() {
         <Route path="recall-game-parser" element={<RecallGameParser />} />
         <Route path="ca-qb-parser" element={<CaQbParser />} />
         <Route path="ca-translate" element={<CaTranslateParser />} />
+        <Route path="ca-month-repair" element={<CaMonthRepair />} />
+        <Route path="daily-bytes-month-repair" element={<DailyBytesMonthRepair />} />
+        <Route path="recall-game-month-repair" element={<RecallGameMonthRepair />} />
+        <Route path="ca-qb-month-repair" element={<CaQbMonthRepair />} />
         <Route
           path="tnpsc-parser"
           element={

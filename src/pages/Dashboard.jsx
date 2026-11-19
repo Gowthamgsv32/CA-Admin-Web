@@ -10,6 +10,10 @@ const descriptions = {
   '/tnpsc-parser': 'Turn textbook PDFs into TNPSC exam question JSON with Gemini.',
   '/ca-qb-parser': 'Generate a full exam-style question bank from a day’s current affairs.',
   '/ca-translate': 'Auto-translate missing Tamil, Hindi, and Malayalam content straight into the sheet.',
+  '/ca-month-repair': 'Calendar view of a month’s CA data — fetch missing days and republish.',
+  '/daily-bytes-month-repair': 'Calendar view of a month’s Daily Bytes data — fetch missing days and republish.',
+  '/recall-game-month-repair': 'Calendar view of a month’s Recall Game data — fetch missing days and republish.',
+  '/ca-qb-month-repair': 'Calendar view of a month’s CA QB game data — fetch missing days and republish.',
 }
 
 const tools = navItems.filter((item) => item.to !== '/')
