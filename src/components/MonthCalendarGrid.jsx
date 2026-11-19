@@ -36,7 +36,18 @@ function MonthCalendarGrid({ month, year, dayInfo, fetchingDay, onFetchDay }) {
             >
               <span className="month-calendar-day">{d}</span>
               {info.present ? (
-                <span className="month-calendar-label">{info.label || 'Present'}</span>
+                <span className="month-calendar-present-row">
+                  <span className="month-calendar-label">{info.label || 'Present'}</span>
+                  <button
+                    type="button"
+                    className="month-calendar-refetch-btn"
+                    onClick={() => onFetchDay(d)}
+                    disabled={isFetching}
+                    title="Re-fetch this day from the server"
+                  >
+                    {isFetching ? '…' : '↻'}
+                  </button>
+                </span>
               ) : (
                 <button
                   type="button"

@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { RECALL_GAME_BASE, RECALL_GAME_ROOT_URL, WORKER_URL } from '../config/api'
 import { MONTH_NAMES, dayOfMonthFromDMY } from '../utils/dailyBytesPublish'
 import { dmyForDay, monthKeyFor, patchMonthEntry } from '../utils/monthRepair'
+import { findFormatIssues, findIdConflicts, validateTopicEntry } from '../utils/monthRepairValidate'
 import { bytesToBase64, createZip } from '../utils/zip'
 import MonthCalendarGrid from '../components/MonthCalendarGrid'
+import DataCheckAlerts from '../components/DataCheckAlerts'
 
 function buildYearOptions() {
   const current = new Date().getFullYear()
@@ -33,6 +35,7 @@ function RecallGameMonthRepair() {
 
   const [fetchingDay, setFetchingDay] = useState(null)
   const [dayErrors, setDayErrors] = useState({})
+  const [conflicts, setConflicts] = useState([])
 
   const [versionOverride, setVersionOverride] = useState('')
 
@@ -68,6 +71,7 @@ function RecallGameMonthRepair() {
     setMonthError('')
     setMonthJson(null)
     setDayErrors({})
+    setConflicts([])
     setGenerated(null)
     setPublishResults(null)
     setMonthLoading(true)
@@ -112,6 +116,11 @@ function RecallGameMonthRepair() {
     return map
   }, [monthJson, dayErrors])
 
+  const formatIssues = useMemo(() => {
+    if (!monthJson) return []
+    return findFormatIssues(monthJson.topics, 'id', validateTopicEntry)
+  }, [monthJson])
+
   async function handleFetchDay(day) {
     const dateDMY = dmyForDay(day, month, year)
     setFetchingDay(day)
@@ -125,9 +134,13 @@ function RecallGameMonthRepair() {
       if (!res.ok) throw new Error(`No day file found (${res.status})`)
       const dayJson = await res.json()
 
+      const base = monthJson || { topics: [] }
+      const newConflicts = findIdConflicts(base.topics, dayJson.topics || [], 'id')
+      if (newConflicts.length > 0) setConflicts((prev) => [...prev, ...newConflicts])
+
       setMonthJson((prev) => {
-        const base = prev || { topics: [] }
-        const byId = new Map(base.topics.map((t) => [t.id, t]))
+        const current = prev || { topics: [] }
+        const byId = new Map(current.topics.map((t) => [t.id, t]))
         for (const t of dayJson.topics || []) byId.set(t.id, t)
         return { topics: [...byId.values()].sort((a, b) => a.id - b.id) }
       })
@@ -301,6 +314,9 @@ function RecallGameMonthRepair() {
           </div>
           <div style={{ padding: '0 20px 20px' }}>
             <MonthCalendarGrid month={month} year={year} dayInfo={dayInfo} fetchingDay={fetchingDay} onFetchDay={handleFetchDay} />
+          </div>
+          <div style={{ padding: '0 20px 20px' }}>
+            <DataCheckAlerts conflicts={conflicts} formatIssues={formatIssues} />
           </div>
         </section>
       )}

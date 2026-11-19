@@ -415,6 +415,12 @@
   border: 1px solid rgba(46, 175, 111, 0.3);
 }
 
+.alert-warning {
+  background: rgba(230, 162, 29, 0.12);
+  color: #b4780f;
+  border: 1px solid rgba(230, 162, 29, 0.3);
+}
+
 .result-card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -1052,6 +1058,37 @@
   color: #1f9d5a;
   font-weight: 600;
   text-align: center;
+}
+
+.month-calendar-present-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.month-calendar-refetch-btn {
+  font-size: 11px;
+  line-height: 1;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+
+.month-calendar-refetch-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.month-calendar-refetch-btn:not(:disabled):hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .month-calendar-fetch-btn {

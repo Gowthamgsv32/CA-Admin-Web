@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { CA_GAME_BASE, CA_GAME_QB_ROOT_URL, WORKER_URL } from '../config/api'
 import { MONTH_NAMES } from '../utils/dailyBytesPublish'
 import { dmyForDay, monthKeyFor, patchMonthEntry } from '../utils/monthRepair'
+import { findFormatIssues, findIdConflicts, validateQbQuestionEntry } from '../utils/monthRepairValidate'
 import { bytesToBase64, createZip, extractFirstFileFromZip } from '../utils/zip'
 import MonthCalendarGrid from '../components/MonthCalendarGrid'
+import DataCheckAlerts from '../components/DataCheckAlerts'
 
 function buildYearOptions() {
   const current = new Date().getFullYear()
@@ -53,6 +55,7 @@ function CaQbMonthRepair() {
 
   const [fetchingDay, setFetchingDay] = useState(null)
   const [dayErrors, setDayErrors] = useState({})
+  const [conflicts, setConflicts] = useState([])
 
   const [versionOverride, setVersionOverride] = useState('')
 
@@ -88,6 +91,7 @@ function CaQbMonthRepair() {
     setMonthError('')
     setQuestions(null)
     setDayErrors({})
+    setConflicts([])
     setGenerated(null)
     setPublishResults(null)
     setMonthLoading(true)
@@ -130,6 +134,11 @@ function CaQbMonthRepair() {
     return map
   }, [questions, dayErrors])
 
+  const formatIssues = useMemo(() => {
+    if (!questions) return []
+    return findFormatIssues(questions, 'qid', validateQbQuestionEntry)
+  }, [questions])
+
   async function handleFetchDay(day) {
     const dateDMY = dmyForDay(day, month, year)
     setFetchingDay(day)
@@ -140,6 +149,11 @@ function CaQbMonthRepair() {
     })
     try {
       const dayQuestions = await fetchAndExtractZip(`${CA_GAME_BASE}/${dateDMY}.zip`)
+
+      const base = questions || []
+      const newConflicts = findIdConflicts(base, dayQuestions, 'qid')
+      if (newConflicts.length > 0) setConflicts((prev) => [...prev, ...newConflicts])
+
       setQuestions((prev) => {
         const byQid = new Map((prev || []).map((q) => [q.qid, q]))
         for (const q of dayQuestions) byQid.set(q.qid, q)
@@ -313,6 +327,9 @@ function CaQbMonthRepair() {
           </div>
           <div style={{ padding: '0 20px 20px' }}>
             <MonthCalendarGrid month={month} year={year} dayInfo={dayInfo} fetchingDay={fetchingDay} onFetchDay={handleFetchDay} />
+          </div>
+          <div style={{ padding: '0 20px 20px' }}>
+            <DataCheckAlerts conflicts={conflicts} formatIssues={formatIssues} />
           </div>
         </section>
       )}

@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { CA_ROOT_URL, CURRENT_AFFAIRS_BASE, WORKER_URL } from '../config/api'
 import { MONTH_NAMES, dayOfMonthFromDMY } from '../utils/dailyBytesPublish'
 import { dmyForDay, monthKeyFor, patchMonthEntry } from '../utils/monthRepair'
+import { findFormatIssues, findIdConflicts, validateCaQuestionEntry, validateCasEntry } from '../utils/monthRepairValidate'
 import { buildMonthZipBytes } from '../utils/caPublish'
 import { bytesToBase64 } from '../utils/zip'
 import MonthCalendarGrid from '../components/MonthCalendarGrid'
+import DataCheckAlerts from '../components/DataCheckAlerts'
 
 function buildYearOptions() {
   const current = new Date().getFullYear()
@@ -30,6 +32,7 @@ function CaMonthRepair() {
 
   const [fetchingDay, setFetchingDay] = useState(null)
   const [dayErrors, setDayErrors] = useState({})
+  const [conflicts, setConflicts] = useState([])
 
   const [versionOverride, setVersionOverride] = useState('')
 
@@ -65,6 +68,7 @@ function CaMonthRepair() {
     setMonthError('')
     setMonthJson(null)
     setDayErrors({})
+    setConflicts([])
     setGenerated(null)
     setPublishResults(null)
     setMonthLoading(true)
@@ -109,6 +113,14 @@ function CaMonthRepair() {
     return map
   }, [monthJson, dayErrors])
 
+  const formatIssues = useMemo(() => {
+    if (!monthJson) return []
+    return [
+      ...findFormatIssues(monthJson.cas, 'id', validateCasEntry),
+      ...findFormatIssues(monthJson.questions, 'qid', validateCaQuestionEntry),
+    ]
+  }, [monthJson])
+
   async function handleFetchDay(day) {
     const dateDMY = dmyForDay(day, month, year)
     setFetchingDay(day)
@@ -122,11 +134,18 @@ function CaMonthRepair() {
       if (!res.ok) throw new Error(`No day file found (${res.status})`)
       const dayJson = await res.json()
 
+      const base = monthJson || { cas: [], questions: [] }
+      const newConflicts = [
+        ...findIdConflicts(base.cas, dayJson.cas || [], 'id'),
+        ...findIdConflicts(base.questions, dayJson.questions || [], 'qid'),
+      ]
+      if (newConflicts.length > 0) setConflicts((prev) => [...prev, ...newConflicts])
+
       setMonthJson((prev) => {
-        const base = prev || { cas: [], questions: [] }
-        const casById = new Map(base.cas.map((c) => [c.id, c]))
+        const current = prev || { cas: [], questions: [] }
+        const casById = new Map(current.cas.map((c) => [c.id, c]))
         for (const c of dayJson.cas || []) casById.set(c.id, c)
-        const questionsByQid = new Map(base.questions.map((q) => [q.qid, q]))
+        const questionsByQid = new Map(current.questions.map((q) => [q.qid, q]))
         for (const q of dayJson.questions || []) questionsByQid.set(q.qid, q)
         return {
           cas: [...casById.values()].sort((a, b) => a.id - b.id),
@@ -306,6 +325,9 @@ function CaMonthRepair() {
           </div>
           <div style={{ padding: '0 20px 20px' }}>
             <MonthCalendarGrid month={month} year={year} dayInfo={dayInfo} fetchingDay={fetchingDay} onFetchDay={handleFetchDay} />
+          </div>
+          <div style={{ padding: '0 20px 20px' }}>
+            <DataCheckAlerts conflicts={conflicts} formatIssues={formatIssues} />
           </div>
         </section>
       )}
